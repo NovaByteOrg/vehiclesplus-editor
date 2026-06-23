@@ -20,6 +20,11 @@ import type { PartDef } from "./vehicle";
 
 const DEG = Math.PI / 180;
 const FALLBACK_HEX = "#9aa0a6";
+// Minecraft renders an item worn on a head (armour-stand HEAD slot) at 0.625 scale (CustomHeadLayer).
+// V3 places every vehicle part as a head item, so this applies to all of them. Without it the
+// display.head scale (~3.8) blows the body up to ~6 blocks while the wheel offsets stay ~±1.9, so the
+// wheels cluster in the body's middle instead of reaching the corners.
+const HEAD_ITEM_SCALE = 0.625;
 const textureCache = new Map<string, THREE.Texture>();
 
 type Face = "down" | "up" | "north" | "south" | "west" | "east";
@@ -184,7 +189,12 @@ export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?
       transform.scale.set(display.scale[0], display.scale[1], display.scale[2]);
     }
   }
-  return transform;
+
+  // The whole worn item (display transform + model) is scaled by the head-item factor.
+  const headItem = new THREE.Group();
+  headItem.scale.setScalar(HEAD_ITEM_SCALE);
+  headItem.add(transform);
+  return headItem;
 }
 
 /**

@@ -1,11 +1,17 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import VehicleScene from "@/components/VehicleScene";
 import ResourcePackPicker from "@/components/ResourcePackPicker";
-import { exportDefinitions, loadVehicleFiles, type LoadedVehicle } from "@/lib/migration";
+import {
+  exportDefinitions,
+  fetchResourcePackFile,
+  loadPluginFolder,
+  loadVehicleFiles,
+  type LoadedVehicle,
+} from "@/lib/migration";
 import { generateV4PackForAll } from "@/lib/generate-pack";
-import { resolveModelId, type ResourcePack } from "@/lib/resourcepack";
+import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -25,6 +31,15 @@ export default function MigrationWorkspace() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const configInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+
+  // The directory-picker attributes aren't in React's input types; set them on the element.
+  useEffect(() => {
+    if (folderInput.current) {
+      const el = folderInput.current as HTMLInputElement & { webkitdirectory?: boolean };
+      el.webkitdirectory = true;
+    }
+  }, []);
 
   const current = vehicles[selected] ?? null;
 
@@ -33,6 +48,35 @@ export default function MigrationWorkspace() {
     const { vehicles: loaded, errors: errs } = await loadVehicleFiles(files);
     setVehicles((prev) => [...prev, ...loaded]);
     setErrors(errs);
+  }
+
+  async function onPluginFolder(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setBusy(true);
+    try {
+      const { vehicles: loaded, errors: errs, resourcePackUrl, packZip } = await loadPluginFolder(files);
+      setVehicles((prev) => [...prev, ...loaded]);
+      const allErrors = [...errs];
+      try {
+        if (packZip) {
+          setPack(await loadResourcePack(packZip));
+          setPackFile(packZip);
+        } else if (resourcePackUrl) {
+          const file = await fetchResourcePackFile(resourcePackUrl);
+          setPack(await loadResourcePack(file));
+          setPackFile(file);
+        }
+      } catch (e) {
+        allErrors.push(
+          `Couldn't load the resource pack${resourcePackUrl ? ` from ${resourcePackUrl}` : ""} — upload it manually. (${
+            e instanceof Error ? e.message : e
+          })`,
+        );
+      }
+      setErrors(allErrors);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function resolvedCount(vehicle: LoadedVehicle) {
@@ -85,6 +129,22 @@ export default function MigrationWorkspace() {
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
+            ref={folderInput}
+            type="file"
+            className="hidden"
+            onChange={(e) => {
+              onPluginFolder(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => folderInput.current?.click()}
+            disabled={busy}
+            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-40"
+          >
+            {busy ? "Loading…" : "Upload plugin folder"}
+          </button>
+          <input
             ref={configInput}
             type="file"
             accept=".hjson,.json,.txt"
@@ -126,7 +186,11 @@ export default function MigrationWorkspace() {
       </header>
 
       {vehicles.length === 0 ? (
-        <EmptyState onAdd={() => configInput.current?.click()} errors={errors} />
+        <EmptyState
+          onUploadFolder={() => folderInput.current?.click()}
+          onAdd={() => configInput.current?.click()}
+          errors={errors}
+        />
       ) : (
         <div className="flex min-h-0 flex-1">
           <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800">
@@ -255,21 +319,35 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-function EmptyState({ onAdd, errors }: { onAdd: () => void; errors: string[] }) {
+function EmptyState({
+  onUploadFolder,
+  onAdd,
+  errors,
+}: {
+  onUploadFolder: () => void;
+  onAdd: () => void;
+  errors: string[];
+}) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
-      <div className="max-w-md space-y-3">
+      <div className="max-w-md space-y-4">
         <h1 className="text-2xl font-semibold">Migrate your vehicles to V4</h1>
         <p className="text-sm text-neutral-400">
-          Upload your V3 vehicle configs (HJSON or JSON — pick as many as you like) and your resource
-          pack. Convert, page through them in 3D, then export V4 definitions and a V4 resource pack.
+          Upload your whole <code className="text-neutral-300">plugins/VehiclesPlus</code> folder — it finds
+          every vehicle config and pulls the resource pack straight from your config.
         </p>
         <button
-          onClick={onAdd}
+          onClick={onUploadFolder}
           className="rounded bg-amber-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-amber-400"
         >
-          Add vehicle configs
+          Upload plugin folder
         </button>
+        <p className="text-xs text-neutral-500">
+          or{" "}
+          <button onClick={onAdd} className="underline hover:text-neutral-300">
+            add config files manually
+          </button>
+        </p>
         <p className="text-xs text-neutral-600">
           Coming soon: <code className="text-neutral-400">/vp migrate</code> loads them straight from your
           running server.

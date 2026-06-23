@@ -46,3 +46,45 @@ export async function exportDefinitions(vehicles: LoadedVehicle[]): Promise<Blob
   }
   return zip.generateAsync({ type: "blob" });
 }
+
+function relativePath(file: File): string {
+  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+}
+
+/** Extract `resourcePackUrl` from a V3 config.yml's text. */
+export function extractResourcePackUrl(configYaml: string): string | null {
+  const match = configYaml.match(/^\s*resourcePackUrl:\s*['"]?([^'"\n#]+?)['"]?\s*(?:#.*)?$/m);
+  return match ? match[1].trim() : null;
+}
+
+export interface PluginFolderResult extends ParseResult {
+  resourcePackUrl: string | null;
+  packZip: File | null;
+}
+
+/**
+ * Discover everything in an uploaded `plugins/VehiclesPlus` folder: vehicle configs under
+ * `vehicles/**.hjson`, the `resourcePackUrl` from `config.yml`, and any `.zip` (a local pack).
+ */
+export async function loadPluginFolder(files: FileList | File[]): Promise<PluginFolderResult> {
+  const all = Array.from(files);
+
+  const configs = all.filter((f) => /\/vehicles\/.+\.(hjson|json)$/i.test(relativePath(f)));
+  const { vehicles, errors } = await loadVehicleFiles(configs);
+  if (configs.length === 0) {
+    errors.push("No vehicle configs found under a vehicles/ folder.");
+  }
+
+  const configYml = all.find((f) => /config\.ya?ml$/i.test(relativePath(f)));
+  const resourcePackUrl = configYml ? extractResourcePackUrl(await configYml.text()) : null;
+  const packZip = all.find((f) => /\.zip$/i.test(f.name)) ?? null;
+
+  return { vehicles, errors, resourcePackUrl, packZip };
+}
+
+/** Fetch a resource pack by URL through the server-side proxy (avoids browser CORS). */
+export async function fetchResourcePackFile(url: string): Promise<File> {
+  const response = await fetch(`/api/fetch-pack?url=${encodeURIComponent(url)}`);
+  if (!response.ok) throw new Error(`resource pack fetch failed (${response.status})`);
+  return new File([await response.blob()], "resourcepack.zip");
+}

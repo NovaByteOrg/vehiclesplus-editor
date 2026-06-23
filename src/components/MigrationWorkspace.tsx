@@ -1,0 +1,281 @@
+"use client";
+
+import { useRef, useState } from "react";
+import VehicleScene from "@/components/VehicleScene";
+import ResourcePackPicker from "@/components/ResourcePackPicker";
+import { exportDefinitions, loadVehicleFiles, type LoadedVehicle } from "@/lib/migration";
+import { generateV4PackForAll } from "@/lib/generate-pack";
+import { resolveModelId, type ResourcePack } from "@/lib/resourcepack";
+
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function MigrationWorkspace() {
+  const [vehicles, setVehicles] = useState<LoadedVehicle[]>([]);
+  const [selected, setSelected] = useState(0);
+  const [pack, setPack] = useState<ResourcePack | null>(null);
+  const [packFile, setPackFile] = useState<File | null>(null);
+  const [showModels, setShowModels] = useState(true);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const configInput = useRef<HTMLInputElement>(null);
+
+  const current = vehicles[selected] ?? null;
+
+  async function onConfigFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const { vehicles: loaded, errors: errs } = await loadVehicleFiles(files);
+    setVehicles((prev) => [...prev, ...loaded]);
+    setErrors(errs);
+  }
+
+  function resolvedCount(vehicle: LoadedVehicle) {
+    const total = vehicle.definition.parts.length;
+    if (!pack) return { matched: 0, total };
+    let matched = 0;
+    for (const part of vehicle.definition.parts) {
+      if (resolveModelId(pack, part.baseMaterial, part.customModelData)) matched += 1;
+    }
+    return { matched, total };
+  }
+
+  async function generatePack() {
+    if (!pack || !packFile || vehicles.length === 0) return;
+    setBusy(true);
+    try {
+      const { blob, definitions } = await generateV4PackForAll(
+        packFile,
+        pack,
+        vehicles.map((v) => v.definition),
+      );
+      saveBlob(blob, "vehiclesplus-v4-pack.zip");
+      setVehicles((prev) => prev.map((v, i) => ({ ...v, definition: definitions[i] ?? v.definition })));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportAllDefs() {
+    if (vehicles.length === 0) return;
+    saveBlob(await exportDefinitions(vehicles), "vehiclesplus-definitions.zip");
+  }
+
+  function exportOne() {
+    if (!current) return;
+    saveBlob(
+      new Blob([JSON.stringify(current.definition, null, 2)], { type: "application/json" }),
+      `${current.definition.id}.json`,
+    );
+  }
+
+  return (
+    <main className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
+      <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2.5">
+        <span className="text-lg font-semibold">
+          VehiclesPlus <span className="text-amber-400">Migrate</span>
+        </span>
+        <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">
+          {vehicles.length} vehicles
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <input
+            ref={configInput}
+            type="file"
+            accept=".hjson,.json,.txt"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              onConfigFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => configInput.current?.click()}
+            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+          >
+            Add configs
+          </button>
+          <ResourcePackPicker
+            onLoad={(loaded, file) => {
+              setPack(loaded);
+              setPackFile(file ?? null);
+            }}
+          />
+          <span className="mx-1 h-4 w-px bg-neutral-700" />
+          <button
+            onClick={generatePack}
+            disabled={!pack || !packFile || vehicles.length === 0 || busy}
+            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-40"
+          >
+            {busy ? "Generating…" : "Generate V4 pack"}
+          </button>
+          <button
+            onClick={exportAllDefs}
+            disabled={vehicles.length === 0}
+            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
+          >
+            Export definitions
+          </button>
+        </div>
+      </header>
+
+      {vehicles.length === 0 ? (
+        <EmptyState onAdd={() => configInput.current?.click()} errors={errors} />
+      ) : (
+        <div className="flex min-h-0 flex-1">
+          <aside className="flex w-60 shrink-0 flex-col border-r border-neutral-800">
+            <div className="border-b border-neutral-800 px-3 py-2 text-xs uppercase tracking-wide text-neutral-500">
+              Vehicles
+            </div>
+            <ul className="min-h-0 flex-1 overflow-y-auto p-1">
+              {vehicles.map((vehicle, i) => {
+                const { matched, total } = resolvedCount(vehicle);
+                const tone = !pack
+                  ? "text-neutral-500"
+                  : matched === total
+                    ? "text-green-400"
+                    : matched > 0
+                      ? "text-amber-400"
+                      : "text-red-400";
+                return (
+                  <li key={i}>
+                    <button
+                      onClick={() => setSelected(i)}
+                      className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm ${
+                        i === selected ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
+                      }`}
+                    >
+                      <span className="truncate">{vehicle.definition.name || vehicle.definition.id}</span>
+                      <span className={`ml-2 shrink-0 text-xs ${tone}`}>
+                        {pack ? `${matched}/${total}` : `${total}p`}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </aside>
+
+          <section className="relative flex-1">
+            {current && (
+              <VehicleScene
+                key={current.definition.id}
+                definition={current.definition}
+                pack={showModels ? pack : null}
+              />
+            )}
+            <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3">
+              <button
+                onClick={() => setSelected((s) => Math.max(0, s - 1))}
+                disabled={selected === 0}
+                className="pointer-events-auto rounded bg-neutral-800/80 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-30"
+              >
+                ← Prev
+              </button>
+              <label className="pointer-events-auto flex items-center gap-1.5 rounded bg-neutral-800/80 px-2 py-1 text-xs text-neutral-300">
+                <input type="checkbox" checked={showModels} onChange={(e) => setShowModels(e.target.checked)} />
+                models
+              </label>
+              <button
+                onClick={() => setSelected((s) => Math.min(vehicles.length - 1, s + 1))}
+                disabled={selected >= vehicles.length - 1}
+                className="pointer-events-auto rounded bg-neutral-800/80 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-30"
+              >
+                Next →
+              </button>
+            </div>
+            <p className="pointer-events-none absolute bottom-3 left-3 text-xs text-neutral-600">
+              drag to orbit · scroll to zoom
+            </p>
+          </section>
+
+          {current && (
+            <aside className="w-72 shrink-0 overflow-y-auto border-l border-neutral-800 p-4 text-sm">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-medium text-neutral-200">{current.definition.name}</h2>
+                <button
+                  onClick={exportOne}
+                  className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+                >
+                  Export
+                </button>
+              </div>
+              <dl className="mb-4 space-y-1 text-xs text-neutral-400">
+                <Row k="id" v={current.definition.id} />
+                <Row k="type" v={current.definition.type} />
+                <Row k="max speed" v={String(current.definition.physics?.maxSpeed ?? "—")} />
+                <Row k="seats" v={String(current.definition.seats?.length ?? 0)} />
+                <Row k="source" v={current.fileName} />
+              </dl>
+              <h3 className="mb-2 text-xs uppercase tracking-wide text-neutral-500">Parts</h3>
+              <ul className="space-y-1">
+                {current.definition.parts.map((part) => {
+                  const matched = pack ? resolveModelId(pack, part.baseMaterial, part.customModelData) : null;
+                  return (
+                    <li key={part.id} className="flex items-center justify-between rounded bg-neutral-900 px-2 py-1.5">
+                      <span className="text-neutral-300">{part.id}</span>
+                      {pack ? (
+                        <span className={matched ? "text-green-400" : "text-red-400"}>
+                          {matched ? "model ✓" : "no model"}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-neutral-500">cmd {part.customModelData ?? "—"}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </aside>
+          )}
+        </div>
+      )}
+
+      {errors.length > 0 && (
+        <div className="border-t border-red-900/50 bg-red-950/40 px-4 py-1.5 text-xs text-red-300">
+          {errors.length} file(s) failed — {errors[0]}
+          {errors.length > 1 ? ` (+${errors.length - 1} more)` : ""}
+        </div>
+      )}
+    </main>
+  );
+}
+
+function Row({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <dt>{k}</dt>
+      <dd className="truncate text-neutral-200">{v}</dd>
+    </div>
+  );
+}
+
+function EmptyState({ onAdd, errors }: { onAdd: () => void; errors: string[] }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
+      <div className="max-w-md space-y-3">
+        <h1 className="text-2xl font-semibold">Migrate your vehicles to V4</h1>
+        <p className="text-sm text-neutral-400">
+          Upload your V3 vehicle configs (HJSON or JSON — pick as many as you like) and your resource
+          pack. Convert, page through them in 3D, then export V4 definitions and a V4 resource pack.
+        </p>
+        <button
+          onClick={onAdd}
+          className="rounded bg-amber-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-amber-400"
+        >
+          Add vehicle configs
+        </button>
+        <p className="text-xs text-neutral-600">
+          Coming soon: <code className="text-neutral-400">/vp migrate</code> loads them straight from your
+          running server.
+        </p>
+      </div>
+      {errors.length > 0 && <p className="text-xs text-red-400">{errors[0]}</p>}
+    </div>
+  );
+}

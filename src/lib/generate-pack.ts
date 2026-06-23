@@ -54,3 +54,43 @@ export async function generateV4Pack(
   const blob = await zip.generateAsync({ type: "blob" });
   return { blob, definition: { ...definition, parts }, itemModels };
 }
+
+export interface GeneratedPackAll {
+  blob: Blob;
+  definitions: VehicleDefinition[];
+  itemModels: number;
+}
+
+/** Generate one V4 resource pack covering every loaded vehicle. */
+export async function generateV4PackForAll(
+  sourceZip: File | Blob,
+  pack: ResourcePack,
+  definitions: VehicleDefinition[],
+): Promise<GeneratedPackAll> {
+  const zip = await JSZip.loadAsync(sourceZip);
+  let itemModels = 0;
+  const out: VehicleDefinition[] = [];
+
+  for (const definition of definitions) {
+    const parts = definition.parts.map((part) => {
+      const modelId = part.itemModel ?? resolveModelId(pack, part.baseMaterial, part.customModelData);
+      if (!modelId) return part;
+      const path = `${definition.id}/${part.id}`;
+      zip.file(
+        `assets/${NAMESPACE}/items/${path}.json`,
+        JSON.stringify({ model: { type: "minecraft:model", model: modelId } }, null, 2),
+      );
+      itemModels += 1;
+      return { ...part, itemModel: `${NAMESPACE}:${path}` };
+    });
+    out.push({ ...definition, parts });
+  }
+
+  zip.file(
+    "pack.mcmeta",
+    JSON.stringify({ pack: { pack_format: V4_PACK_FORMAT, description: "VehiclesPlus V4 pack" } }, null, 2),
+  );
+
+  const blob = await zip.generateAsync({ type: "blob" });
+  return { blob, definitions: out, itemModels };
+}

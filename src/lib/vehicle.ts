@@ -54,8 +54,9 @@ export interface VehicleDefinition {
  */
 export const MATERIAL_COLORS: Record<string, { color: string; opacity?: number }> = {
   IRON_BLOCK: { color: "#d8d8d8" },
-  GLASS: { color: "#a8d0e6", opacity: 0.4 },
-  COAL_BLOCK: { color: "#1b1b1b" },
+  GLASS: { color: "#a8d0e6", opacity: 0.45 },
+  // Wheels import as COAL_BLOCK placeholders — keep them a visible grey, not near-black.
+  COAL_BLOCK: { color: "#53585f" },
 };
 
 /** The bundled sample, matching the plugin's `module-vehicles/.../vehicles/sedan.json`. */

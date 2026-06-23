@@ -1,8 +1,9 @@
 /**
  * Converts a resolved Minecraft model (elements + textures + head display transform) into a Three.js
- * object: one textured quad per defined element face, element rotations applied around their origin,
- * and the model's `display.head` transform on the whole thing (so it sits like a V3 armor-stand head
- * item). First cut — fidelity (uv rotation, tinting, animations) is iterated on visually.
+ * object: one quad per defined element face, element rotations applied around their origin, and the
+ * model's `display.head` transform on the whole thing. Robust by design — geometry renders even when
+ * a texture can't be resolved (flat fallback colour), so a resolved model is never invisible, and
+ * flat/`item/generated` models render as a textured sprite.
  */
 
 import * as THREE from "three";
@@ -18,6 +19,7 @@ import {
 import type { PartDef } from "./vehicle";
 
 const DEG = Math.PI / 180;
+const FALLBACK_COLOR = 0x9a8a6a;
 const textureCache = new Map<string, THREE.Texture>();
 
 type Face = "down" | "up" | "north" | "south" | "west" | "east";
@@ -35,6 +37,19 @@ function texture(url: string): THREE.Texture {
   return tex;
 }
 
+function faceMaterial(url: string | null): THREE.Material {
+  if (url) {
+    return new THREE.MeshStandardMaterial({
+      map: texture(url),
+      alphaTest: 0.1,
+      roughness: 1,
+      metalness: 0,
+      side: THREE.DoubleSide,
+    });
+  }
+  return new THREE.MeshStandardMaterial({ color: FALLBACK_COLOR, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+}
+
 /** Face corners (block units) viewed face-on, ordered top-left, top-right, bottom-right, bottom-left. */
 function faceCorners(face: Face, f: number[], t: number[]): number[][] {
   const [x0, y0, z0] = f;
@@ -49,7 +64,6 @@ function faceCorners(face: Face, f: number[], t: number[]): number[][] {
   }
 }
 
-/** Default uv (0..16) projected from the element bounds when a face omits `uv`. */
 function defaultUv(face: Face, from: number[], to: number[]): [number, number, number, number] {
   const x0 = from[0] * 16, y0 = from[1] * 16, z0 = from[2] * 16;
   const x1 = to[0] * 16, y1 = to[1] * 16, z1 = to[2] * 16;
@@ -63,17 +77,7 @@ function defaultUv(face: Face, from: number[], to: number[]): [number, number, n
   }
 }
 
-function buildFace(
-  face: Face,
-  from: number[],
-  to: number[],
-  mcFace: McFace,
-  model: ResolvedModel,
-  pack: ResourcePack,
-): THREE.Mesh | null {
-  const url = resolveTexture(pack, model.textures, mcFace.texture);
-  if (!url) return null;
-
+function buildFace(face: Face, from: number[], to: number[], mcFace: McFace, model: ResolvedModel, pack: ResourcePack): THREE.Mesh {
   const corners = faceCorners(face, from, to);
   const [u1, v1, u2, v2] = (mcFace.uv ?? defaultUv(face, from, to)).map((n) => n / 16);
   const uvs = [
@@ -94,15 +98,7 @@ function buildFace(
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvArray, 2));
   geometry.computeVertexNormals();
 
-  const material = new THREE.MeshStandardMaterial({
-    map: texture(url),
-    transparent: true,
-    alphaTest: 0.05,
-    roughness: 1,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  });
-  return new THREE.Mesh(geometry, material);
+  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture)));
 }
 
 function buildElement(element: McElement, model: ResolvedModel, pack: ResourcePack): THREE.Object3D {
@@ -112,9 +108,7 @@ function buildElement(element: McElement, model: ResolvedModel, pack: ResourcePa
   const group = new THREE.Group();
   for (const face of FACES) {
     const mcFace = element.faces?.[face];
-    if (!mcFace) continue;
-    const mesh = buildFace(face, from, to, mcFace, model, pack);
-    if (mesh) group.add(mesh);
+    if (mcFace) group.add(buildFace(face, from, to, mcFace, model, pack));
   }
 
   if (!element.rotation) return group;
@@ -131,10 +125,26 @@ function buildElement(element: McElement, model: ResolvedModel, pack: ResourcePa
   return pivot;
 }
 
+/** A flat (item/generated) model — render its first texture as a centred sprite. */
+function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3D | null {
+  const ref =
+    model.textures.layer0 ?? model.textures["0"] ?? model.textures.particle ?? Object.values(model.textures)[0];
+  if (!ref) return null;
+  const url = resolveTexture(pack, model.textures, ref);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(url));
+  mesh.position.set(0.5, 0.5, 0.5); // centred after the -0.5 model-space shift
+  return mesh;
+}
+
 export function buildModelObject(model: ResolvedModel, pack: ResourcePack): THREE.Object3D {
   const root = new THREE.Group();
-  for (const element of model.elements) {
-    root.add(buildElement(element, model, pack));
+  if (model.elements.length === 0) {
+    const flat = buildFlatModel(model, pack);
+    if (flat) root.add(flat);
+  } else {
+    for (const element of model.elements) {
+      root.add(buildElement(element, model, pack));
+    }
   }
   // Centre the 0..16 model space on the origin (in block units).
   root.position.set(-0.5, -0.5, -0.5);
@@ -162,6 +172,6 @@ export function buildPartModel(pack: ResourcePack, part: PartDef): THREE.Object3
   const modelId = part.itemModel ?? resolveModelId(pack, part.baseMaterial, part.customModelData);
   if (!modelId) return null;
   const model = resolveModel(pack, modelId);
-  if (!model || model.elements.length === 0) return null;
+  if (!model) return null;
   return buildModelObject(model, pack);
 }

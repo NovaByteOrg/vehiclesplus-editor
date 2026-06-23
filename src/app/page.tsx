@@ -1,3 +1,4 @@
+import Link from "next/link";
 import VehicleScene from "@/components/VehicleScene";
 import { SAMPLE_SEDAN } from "@/lib/vehicle";
 
@@ -15,9 +16,17 @@ export default function Home() {
             preview
           </span>
         </div>
-        <span className="text-xs text-neutral-500">
-          {definition.name} · {definition.parts.length} parts
-        </span>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/import"
+            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+          >
+            Import V3
+          </Link>
+          <span className="text-xs text-neutral-500">
+            {definition.name} · {definition.parts.length} parts
+          </span>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-1">

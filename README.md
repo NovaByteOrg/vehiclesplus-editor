@@ -1,36 +1,49 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# VehiclesPlus Editor
 
-## Getting Started
+A web-based editor for **VehiclesPlus V4** vehicle packs — load, preview (3D), edit, and export
+`.vppack` definitions and their resource packs, import legacy **V3** vehicles, and (soon) push
+changes **live** to a running server.
 
-First, run the development server:
+Built with **Next.js** (App Router) + **React Three Fiber**. Runs as a hosted SaaS on **Vercel**
+and is fully **self-hostable**.
+
+> Status: early scaffold. Renders a vehicle definition in 3D (parts as transform-positioned boxes,
+> coloured by material). The roadmap below is what's coming.
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev      # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Build
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build
+npm run start    # serves the production build on :3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Deploy
 
-## Learn More
+- **SaaS (Vercel):** import this repo in Vercel — zero config (it's a standard Next.js app). The
+  owner links the repo to Vercel.
+- **Self-host:** `npm run build && npm run start` behind any reverse proxy, or containerise it
+  (`next build` output runs anywhere Node 18+ runs). The live-sync channel can be hosted in-process
+  for self-host deployments.
 
-To learn more about Next.js, take a look at the following resources:
+## The contract
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+[`src/lib/vehicle.ts`](src/lib/vehicle.ts) is the canonical TypeScript shape of a `.vppack`
+definition, mirroring the plugin's `VehicleDefinition`. The editor owns this; the plugin stays in
+sync via a pack-validation test (no codegen).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Roadmap
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [x] Project scaffold + 3D definition preview
+- [ ] Load / export `.vppack` (definitions + assets)
+- [ ] Real model rendering from resource-pack assets (deepslate)
+- [ ] **V3 import** — convert legacy `VehicleModel` JSON + CMD resource packs to V4 packs
+- [ ] Transform gizmos (move / rotate / scale parts), seat & physics editors
+- [ ] Resource-pack authoring & update
+- [ ] **Live sync** — pair with a running server (session handshake) and apply edits in real time

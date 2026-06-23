@@ -1,0 +1,22 @@
+"use client";
+
+import dynamic from "next/dynamic";
+import type { VehicleDefinition } from "@/lib/vehicle";
+
+// The 3D canvas is client-only (WebGL); never server-render it.
+const VehicleViewer = dynamic(() => import("./VehicleViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full items-center justify-center text-sm text-neutral-500">
+      Loading 3D preview…
+    </div>
+  ),
+});
+
+export default function VehicleScene({ definition }: { definition: VehicleDefinition }) {
+  return (
+    <div className="absolute inset-0">
+      <VehicleViewer definition={definition} />
+    </div>
+  );
+}

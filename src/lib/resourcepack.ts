@@ -197,13 +197,19 @@ export function resolveTexture(
   ref: string,
   depth = 0,
 ): string | null {
+  const id = resolveTextureRef(textures, ref);
+  return id ? (pack.textures.get(normalizeId(id)) ?? null) : null;
+}
+
+/**
+ * Resolve a face's `#ref` through the texture-variable chain to its final texture id (e.g.
+ * `block/white_concrete` or `vp:car/body`) — used to fall back to a vanilla-block colour when the
+ * pack doesn't ship the PNG (V3 models built from vanilla blocks).
+ */
+export function resolveTextureRef(textures: Record<string, string>, ref: string, depth = 0): string | null {
   if (depth > 16) return null;
-  let key = ref.startsWith("#") ? ref.slice(1) : ref;
-  if (ref.startsWith("#")) {
-    const value = textures[key];
-    if (value == null) return null;
-    if (value.startsWith("#")) return resolveTexture(pack, textures, value, depth + 1);
-    key = value;
-  }
-  return pack.textures.get(normalizeId(key)) ?? null;
+  if (!ref.startsWith("#")) return ref;
+  const value = textures[ref.slice(1)];
+  if (value == null) return null;
+  return value.startsWith("#") ? resolveTextureRef(textures, value, depth + 1) : value;
 }

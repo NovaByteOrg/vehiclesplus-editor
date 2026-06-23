@@ -11,15 +11,17 @@ import {
   resolveModel,
   resolveModelId,
   resolveTexture,
+  resolveTextureRef,
   type McElement,
   type McFace,
   type ResolvedModel,
   type ResourcePack,
 } from "./resourcepack";
+import { vanillaBlockColor } from "./vanilla-colors";
 import type { PartDef } from "./vehicle";
 
 const DEG = Math.PI / 180;
-const FALLBACK_COLOR = 0x9a8a6a;
+const FALLBACK_HEX = "#9aa0a6";
 const textureCache = new Map<string, THREE.Texture>();
 
 type Face = "down" | "up" | "north" | "south" | "west" | "east";
@@ -37,7 +39,7 @@ function texture(url: string): THREE.Texture {
   return tex;
 }
 
-function faceMaterial(url: string | null, tint?: THREE.Color): THREE.Material {
+function faceMaterial(url: string | null, baseHex: string | null, tint?: THREE.Color): THREE.Material {
   if (url) {
     return new THREE.MeshStandardMaterial({
       map: texture(url),
@@ -48,7 +50,17 @@ function faceMaterial(url: string | null, tint?: THREE.Color): THREE.Material {
       side: THREE.DoubleSide,
     });
   }
-  return new THREE.MeshStandardMaterial({ color: tint ?? FALLBACK_COLOR, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+  // No PNG in the pack (e.g. a vanilla block): use its representative colour, tinted if applicable.
+  const color = new THREE.Color(baseHex ?? FALLBACK_HEX);
+  if (tint) color.multiply(tint);
+  return new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+}
+
+/** A face's loaded texture URL (or null) plus, when there's no PNG, a vanilla-block fallback colour. */
+function faceTextures(pack: ResourcePack, textures: Record<string, string>, ref: string) {
+  const url = resolveTexture(pack, textures, ref);
+  const baseHex = url ? null : vanillaBlockColor(resolveTextureRef(textures, ref) ?? "");
+  return { url, baseHex };
 }
 
 /** Face corners (block units) viewed face-on, ordered top-left, top-right, bottom-right, bottom-left. */
@@ -108,7 +120,8 @@ function buildFace(
   geometry.computeVertexNormals();
 
   const faceTint = mcFace.tintindex != null && mcFace.tintindex >= 0 ? tint : undefined;
-  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture), faceTint));
+  const { url, baseHex } = faceTextures(pack, model.textures, mcFace.texture);
+  return new THREE.Mesh(geometry, faceMaterial(url, baseHex, faceTint));
 }
 
 function buildElement(
@@ -145,8 +158,8 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
   const ref =
     model.textures.layer0 ?? model.textures["0"] ?? model.textures.particle ?? Object.values(model.textures)[0];
   if (!ref) return null;
-  const url = resolveTexture(pack, model.textures, ref);
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(url));
+  const { url, baseHex } = faceTextures(pack, model.textures, ref);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(url, baseHex));
   mesh.position.set(0.5, 0.5, 0.5); // centred after the -0.5 model-space shift
   return mesh;
 }
@@ -161,10 +174,11 @@ export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?
       root.add(buildElement(element, model, pack, tint));
     }
   }
-  // Minecraft renders a head item as: translate(+0.5) · [T · R · S] · translate(-0.5) · model —
-  // the display transform pivots about the block centre, and the model is re-centred afterwards.
-  // Missing that final +0.5 shifts every part by half a block, which (rotated by each wheel's yaw)
-  // is what knocked the wheels out of alignment with the body.
+  // Minecraft renders a head item as `display.head` applied to the centred model:
+  //   final = translation + R · S · (p − 0.5)     (ItemRenderer: transform.apply(); translate(−0.5))
+  // i.e. the model is centred on the block origin, then scaled/rotated/translated. There is NO extra
+  // re-centre afterwards — adding one shifts each part by ½ block, which (rotated by a wheel's yaw)
+  // splits a wheel pair left/right.
   root.position.set(-0.5, -0.5, -0.5);
 
   const transform = new THREE.Group();
@@ -181,11 +195,7 @@ export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?
       transform.scale.set(display.scale[0], display.scale[1], display.scale[2]);
     }
   }
-
-  const outer = new THREE.Group();
-  outer.position.set(0.5, 0.5, 0.5);
-  outer.add(transform);
-  return outer;
+  return transform;
 }
 
 /**

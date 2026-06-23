@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import type { VehicleDefinition } from "@/lib/vehicle";
+import type { ResourcePack } from "@/lib/resourcepack";
 
 // The 3D canvas is client-only (WebGL); never server-render it.
 const VehicleViewer = dynamic(() => import("./VehicleViewer"), {
@@ -13,10 +14,16 @@ const VehicleViewer = dynamic(() => import("./VehicleViewer"), {
   ),
 });
 
-export default function VehicleScene({ definition }: { definition: VehicleDefinition }) {
+export default function VehicleScene({
+  definition,
+  pack,
+}: {
+  definition: VehicleDefinition;
+  pack?: ResourcePack | null;
+}) {
   return (
     <div className="absolute inset-0">
-      <VehicleViewer definition={definition} />
+      <VehicleViewer definition={definition} pack={pack} />
     </div>
   );
 }

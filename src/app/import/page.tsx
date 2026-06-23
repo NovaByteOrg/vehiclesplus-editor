@@ -4,13 +4,16 @@ import Hjson from "hjson";
 import Link from "next/link";
 import { useState } from "react";
 import VehicleScene from "@/components/VehicleScene";
+import ResourcePackPicker from "@/components/ResourcePackPicker";
 import type { VehicleDefinition } from "@/lib/vehicle";
+import type { ResourcePack } from "@/lib/resourcepack";
 import { convertV3Model, SAMPLE_V3_HJSON, type V3VehicleModel } from "@/lib/v3";
 
 export default function ImportPage() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<VehicleDefinition | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pack, setPack] = useState<ResourcePack | null>(null);
 
   function convert(text: string) {
     try {
@@ -50,7 +53,7 @@ export default function ImportPage() {
             Import <span className="text-amber-400">V3</span>
           </span>
         </div>
-        <span className="text-xs text-neutral-500">paste a V3 vehicle config (HJSON or JSON)</span>
+        <ResourcePackPicker onLoad={setPack} />
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -92,7 +95,7 @@ export default function ImportPage() {
 
         <section className="relative flex-1">
           {result ? (
-            <VehicleScene definition={result} />
+            <VehicleScene definition={result} pack={pack} />
           ) : (
             <div className="flex h-full items-center justify-center text-sm text-neutral-600">
               Convert a V3 config to preview the V4 result

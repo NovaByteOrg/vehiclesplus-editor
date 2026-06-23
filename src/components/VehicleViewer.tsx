@@ -54,7 +54,7 @@ export default function VehicleViewer({
   tint?: Tint;
 }) {
   return (
-    <Canvas shadows camera={{ position: [3, 2.4, 3.4], fov: 50 }}>
+    <Canvas shadows camera={{ position: [4.5, 2.2, 4.5], fov: 50 }}>
       <color attach="background" args={["#0a0a0a"]} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 10, 6]} intensity={1.1} castShadow />

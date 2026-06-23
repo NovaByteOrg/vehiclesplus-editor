@@ -5,7 +5,7 @@
 
 import Hjson from "hjson";
 import JSZip from "jszip";
-import { convertV3Model, type V3VehicleModel } from "./v3";
+import { convertV3Model, type RimItem, type V3VehicleModel } from "./v3";
 import type { VehicleDefinition } from "./vehicle";
 
 export interface LoadedVehicle {
@@ -19,22 +19,42 @@ export interface ParseResult {
 }
 
 /** Parse + convert a single V3 config (HJSON or JSON) text into a V4 definition. */
-export function convertText(text: string): VehicleDefinition {
-  return convertV3Model(Hjson.parse(text) as V3VehicleModel);
+export function convertText(text: string, rims?: Map<string, RimItem>): VehicleDefinition {
+  return convertV3Model(Hjson.parse(text) as V3VehicleModel, rims);
 }
 
 /** Read + convert many uploaded V3 config files; collects per-file errors instead of throwing. */
-export async function loadVehicleFiles(files: FileList | File[]): Promise<ParseResult> {
+export async function loadVehicleFiles(files: FileList | File[], rims?: Map<string, RimItem>): Promise<ParseResult> {
   const vehicles: LoadedVehicle[] = [];
   const errors: string[] = [];
   for (const file of Array.from(files)) {
     try {
-      vehicles.push({ fileName: file.name, definition: convertText(await file.text()) });
+      vehicles.push({ fileName: file.name, definition: convertText(await file.text(), rims) });
     } catch (e) {
       errors.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
   return { vehicles, errors };
+}
+
+/** Load the rim designs (`rims/*.hjson`) into a map of rimDesignId → its skin item (material + CMD). */
+export async function loadRimDesigns(files: FileList | File[]): Promise<Map<string, RimItem>> {
+  const rims = new Map<string, RimItem>();
+  for (const file of Array.from(files)) {
+    if (!/(^|\/)rims\/.+\.(hjson|json)$/i.test(relativePath(file))) continue;
+    try {
+      const rim = Hjson.parse(await file.text()) as {
+        name?: string;
+        skin?: { material?: string; custommodeldata?: number };
+      };
+      if (rim.name) {
+        rims.set(rim.name, { material: rim.skin?.material, customModelData: rim.skin?.custommodeldata });
+      }
+    } catch {
+      // skip malformed rim
+    }
+  }
+  return rims;
 }
 
 /** Zip of every vehicle's V4 definition JSON, under `definitions/<id>.json`. */
@@ -68,9 +88,10 @@ export interface PluginFolderResult extends ParseResult {
  */
 export async function loadPluginFolder(files: FileList | File[]): Promise<PluginFolderResult> {
   const all = Array.from(files);
+  const rims = await loadRimDesigns(all);
 
   const configs = all.filter((f) => /\/vehicles\/.+\.(hjson|json)$/i.test(relativePath(f)));
-  const { vehicles, errors } = await loadVehicleFiles(configs);
+  const { vehicles, errors } = await loadVehicleFiles(configs, rims);
   if (configs.length === 0) {
     errors.push("No vehicle configs found under a vehicles/ folder.");
   }

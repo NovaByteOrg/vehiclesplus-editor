@@ -37,17 +37,18 @@ function texture(url: string): THREE.Texture {
   return tex;
 }
 
-function faceMaterial(url: string | null): THREE.Material {
+function faceMaterial(url: string | null, tint?: THREE.Color): THREE.Material {
   if (url) {
     return new THREE.MeshStandardMaterial({
       map: texture(url),
+      color: tint ?? 0xffffff, // multiplies the texture (tintindex faces only)
       alphaTest: 0.1,
       roughness: 1,
       metalness: 0,
       side: THREE.DoubleSide,
     });
   }
-  return new THREE.MeshStandardMaterial({ color: FALLBACK_COLOR, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+  return new THREE.MeshStandardMaterial({ color: tint ?? FALLBACK_COLOR, roughness: 1, metalness: 0, side: THREE.DoubleSide });
 }
 
 /** Face corners (block units) viewed face-on, ordered top-left, top-right, bottom-right, bottom-left. */
@@ -77,7 +78,15 @@ function defaultUv(face: Face, from: number[], to: number[]): [number, number, n
   }
 }
 
-function buildFace(face: Face, from: number[], to: number[], mcFace: McFace, model: ResolvedModel, pack: ResourcePack): THREE.Mesh {
+function buildFace(
+  face: Face,
+  from: number[],
+  to: number[],
+  mcFace: McFace,
+  model: ResolvedModel,
+  pack: ResourcePack,
+  tint?: THREE.Color,
+): THREE.Mesh {
   const corners = faceCorners(face, from, to);
   const [u1, v1, u2, v2] = (mcFace.uv ?? defaultUv(face, from, to)).map((n) => n / 16);
   const uvs = [
@@ -98,17 +107,23 @@ function buildFace(face: Face, from: number[], to: number[], mcFace: McFace, mod
   geometry.setAttribute("uv", new THREE.BufferAttribute(uvArray, 2));
   geometry.computeVertexNormals();
 
-  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture)));
+  const faceTint = mcFace.tintindex != null && mcFace.tintindex >= 0 ? tint : undefined;
+  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture), faceTint));
 }
 
-function buildElement(element: McElement, model: ResolvedModel, pack: ResourcePack): THREE.Object3D {
+function buildElement(
+  element: McElement,
+  model: ResolvedModel,
+  pack: ResourcePack,
+  tint?: THREE.Color,
+): THREE.Object3D {
   const from = element.from.map((v) => v / 16);
   const to = element.to.map((v) => v / 16);
 
   const group = new THREE.Group();
   for (const face of FACES) {
     const mcFace = element.faces?.[face];
-    if (mcFace) group.add(buildFace(face, from, to, mcFace, model, pack));
+    if (mcFace) group.add(buildFace(face, from, to, mcFace, model, pack, tint));
   }
 
   if (!element.rotation) return group;
@@ -136,14 +151,14 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
   return mesh;
 }
 
-export function buildModelObject(model: ResolvedModel, pack: ResourcePack): THREE.Object3D {
+export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?: THREE.Color): THREE.Object3D {
   const root = new THREE.Group();
   if (model.elements.length === 0) {
     const flat = buildFlatModel(model, pack);
     if (flat) root.add(flat);
   } else {
     for (const element of model.elements) {
-      root.add(buildElement(element, model, pack));
+      root.add(buildElement(element, model, pack, tint));
     }
   }
   // Centre the 0..16 model space on the origin (in block units).
@@ -173,5 +188,8 @@ export function buildPartModel(pack: ResourcePack, part: PartDef): THREE.Object3
   if (!modelId) return null;
   const model = resolveModel(pack, modelId);
   if (!model) return null;
-  return buildModelObject(model, pack);
+  const tint = part.color
+    ? new THREE.Color().setRGB(part.color[0] / 255, part.color[1] / 255, part.color[2] / 255, THREE.SRGBColorSpace)
+    : undefined;
+  return buildModelObject(model, pack, tint);
 }

@@ -23,6 +23,8 @@ export interface PartDef {
   /** Custom-model-data for the legacy fallback path. */
   customModelData?: number;
   colorable?: boolean;
+  /** Default tint colour (RGB 0-255) applied to the model's tintindex faces (V3 leather colour). */
+  color?: [number, number, number];
 }
 
 export interface SeatDef {

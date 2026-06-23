@@ -13,6 +13,7 @@ export interface McFace {
   texture: string; // "#ref"
   uv?: [number, number, number, number]; // 0..16
   rotation?: number; // 0/90/180/270
+  tintindex?: number; // tinted by the item colour when >= 0
 }
 
 export interface McElement {

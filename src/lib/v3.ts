@@ -19,7 +19,13 @@ import type { PartDef, SeatDef, Vec3, VehicleDefinition } from "./vehicle";
 interface V3Item {
   material?: string;
   custommodeldata?: number;
-  color?: unknown;
+  color?: { red?: number; green?: number; blue?: number };
+}
+
+/** A rim design's item (material + CMD), keyed by rimDesignId, for resolving wheel models. */
+export interface RimItem {
+  material?: string;
+  customModelData?: number;
 }
 
 interface V3Part {
@@ -74,7 +80,12 @@ function stripColors(text: string): string {
   return text.replace(/[&§][0-9a-fk-or]/gi, "").trim();
 }
 
-export function convertV3Model(model: V3VehicleModel): VehicleDefinition {
+function colorTriple(color?: { red?: number; green?: number; blue?: number }): [number, number, number] | undefined {
+  if (!color) return undefined;
+  return [color.red ?? 255, color.green ?? 255, color.blue ?? 255];
+}
+
+export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem>): VehicleDefinition {
   const parts: PartDef[] = [];
   const seats: SeatDef[] = [];
 
@@ -95,15 +106,28 @@ export function convertV3Model(model: V3VehicleModel): VehicleDefinition {
     }
 
     if (type === "wheel") {
-      // V3 wheels are drawn by the rim-design system (rimDesignId), not a part item — placeholder.
-      parts.push({
-        id: `wheel_${index}`,
-        offset: [x, y, z],
-        rotation: [0, rotation, 0],
-        scale: [0.25, 0.9, 0.9],
-        baseMaterial: "COAL_BLOCK",
-        colorable: false,
-      });
+      // V3 wheels get their model from a rim design (its skin item is a HEAD item, like other parts).
+      const rim = rims?.get(part.rimDesignId ?? "");
+      if (rim?.material) {
+        parts.push({
+          id: `wheel_${index}`,
+          offset: [x, y + HEAD_Y_OFFSET, z],
+          rotation: [0, rotation, 0],
+          scale: [HEAD_SCALE, HEAD_SCALE, HEAD_SCALE],
+          baseMaterial: rim.material,
+          customModelData: rim.customModelData,
+          colorable: false,
+        });
+      } else {
+        parts.push({
+          id: `wheel_${index}`,
+          offset: [x, y, z],
+          rotation: [0, rotation, 0],
+          scale: [0.25, 0.9, 0.9],
+          baseMaterial: "COAL_BLOCK",
+          colorable: false,
+        });
+      }
       return;
     }
 
@@ -119,6 +143,7 @@ export function convertV3Model(model: V3VehicleModel): VehicleDefinition {
         baseMaterial: part.item.material,
         customModelData: part.item.custommodeldata,
         colorable: part.item.color != null,
+        color: colorTriple(part.item.color),
       });
     }
   });

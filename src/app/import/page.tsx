@@ -1,10 +1,11 @@
 "use client";
 
+import Hjson from "hjson";
 import Link from "next/link";
 import { useState } from "react";
 import VehicleScene from "@/components/VehicleScene";
 import type { VehicleDefinition } from "@/lib/vehicle";
-import { convertV3Model, SAMPLE_V3 } from "@/lib/v3";
+import { convertV3Model, SAMPLE_V3_HJSON, type V3VehicleModel } from "@/lib/v3";
 
 export default function ImportPage() {
   const [input, setInput] = useState("");
@@ -13,7 +14,7 @@ export default function ImportPage() {
 
   function convert(text: string) {
     try {
-      const v4 = convertV3Model(JSON.parse(text));
+      const v4 = convertV3Model(Hjson.parse(text) as V3VehicleModel);
       setResult(v4);
       setError(null);
     } catch (e) {
@@ -23,9 +24,8 @@ export default function ImportPage() {
   }
 
   function loadSample() {
-    const text = JSON.stringify(SAMPLE_V3, null, 2);
-    setInput(text);
-    convert(text);
+    setInput(SAMPLE_V3_HJSON);
+    convert(SAMPLE_V3_HJSON);
   }
 
   function download() {
@@ -50,7 +50,7 @@ export default function ImportPage() {
             Import <span className="text-amber-400">V3</span>
           </span>
         </div>
-        <span className="text-xs text-neutral-500">paste a V3 vehicle config (JSON)</span>
+        <span className="text-xs text-neutral-500">paste a V3 vehicle config (HJSON or JSON)</span>
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -80,7 +80,7 @@ export default function ImportPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             spellCheck={false}
-            placeholder="Paste a V3 VehicleModel JSON here…"
+            placeholder="Paste a V3 vehicle config (HJSON or JSON) here…"
             className="flex-1 resize-none bg-neutral-950 p-3 font-mono text-xs text-neutral-300 outline-none"
           />
           {error && (

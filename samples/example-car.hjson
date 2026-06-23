@@ -1,0 +1,185 @@
+{
+  id: ExampleCar
+  displayName: &cExample &aCar
+  typeId: cars
+  typeStrategies:
+  [
+    {
+      movementType: land
+    }
+  ]
+  price: 100000
+  permissions:
+  {
+    buy: vp.buy.ExampleCar
+    adjust: vp.adjust.ExampleCar
+    spawn: vp.spawn.ExampleCar
+    ride: vp.ride.ExampleCar
+    sitWithoutRidePermission: true
+  }
+  availableColors:
+  [
+    {
+      red: 255
+      green: 0
+      blue: 0
+    }
+    {
+      red: 0
+      green: 0
+      blue: 0
+    }
+    {
+      red: 255
+      green: 255
+      blue: 255
+    }
+  ]
+  parts:
+  [
+    {
+      type: skin
+      xoffset: 0
+      yoffset: -0.2
+      zoffset: 0
+      rotationOffset: 0
+      item:
+      {
+        material: LEATHER_BOOTS
+        custommodeldata: 1
+        color:
+        {
+          red: 255
+          green: 255
+          blue: 255
+        }
+      }
+      position: HEAD
+    }
+    {
+      type: seat
+      xoffset: 0.3
+      yoffset: -1.3
+      zoffset: 0.65
+      rotationOffset: 0
+      steer: true
+    }
+    {
+      type: seat
+      xoffset: 0.3
+      yoffset: -1.3
+      zoffset: -0.65
+      rotationOffset: 0
+      steer: false
+    }
+    {
+      type: seat
+      xoffset: -0.7
+      yoffset: -1.3
+      zoffset: 0.65
+      rotationOffset: 0
+      steer: false
+    }
+    {
+      type: seat
+      xoffset: -0.7
+      yoffset: -1.3
+      zoffset: -0.65
+      rotationOffset: 0
+      steer: false
+    }
+    {
+      type: wheel
+      xoffset: 1.89
+      yoffset: 0
+      zoffset: -1.13
+      rotationOffset: 180
+      rimDesignId: default
+      steering: true
+    }
+    {
+      type: wheel
+      xoffset: 1.89
+      yoffset: 0
+      zoffset: 1.13
+      rotationOffset: 0
+      rimDesignId: default
+      steering: true
+    }
+    {
+      type: wheel
+      xoffset: -1.57
+      yoffset: 0
+      zoffset: -1.13
+      rotationOffset: 180
+      rimDesignId: default
+      steering: false
+    }
+    {
+      type: wheel
+      xoffset: -1.57
+      yoffset: 0
+      zoffset: 1.13
+      rotationOffset: 0
+      rimDesignId: default
+      steering: false
+    }
+  ]
+  maxSpeed:
+  {
+    base: 100
+    upgradable: true
+    max: 200
+    step: 5
+    stepCost: 1000
+    unit: km/h
+  }
+  fuelTank:
+  {
+    base: 50
+    upgradable: true
+    max: 100
+    step: 5
+    stepCost: 1000
+    unit: L
+  }
+  turningRadius:
+  {
+    base: 7
+    upgradable: true
+    max: 15
+    step: 1
+    stepCost: 1000
+    unit: ""
+  }
+  acceleration:
+  {
+    base: 50
+    upgradable: true
+    max: 100
+    step: 5
+    stepCost: 1000
+    unit: ""
+  }
+  hitbox:
+  {
+    length: 3.05
+    width: 2
+    height: 1.25
+  }
+  fuel:
+  {
+    typeId: gasoline
+    usage: 6
+  }
+  realisticSteering: false
+  trunkSize: 27
+  drift: true
+  exitWhileMoving: true
+  health: 100
+  gearbox:
+  {
+    realistic: true
+    cooldown: 10
+  }
+}

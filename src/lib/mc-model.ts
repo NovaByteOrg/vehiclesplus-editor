@@ -161,35 +161,49 @@ export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?
       root.add(buildElement(element, model, pack, tint));
     }
   }
-  // Centre the 0..16 model space on the origin (in block units).
+  // Minecraft renders a head item as: translate(+0.5) · [T · R · S] · translate(-0.5) · model —
+  // the display transform pivots about the block centre, and the model is re-centred afterwards.
+  // Missing that final +0.5 shifts every part by half a block, which (rotated by each wheel's yaw)
+  // is what knocked the wheels out of alignment with the body.
   root.position.set(-0.5, -0.5, -0.5);
 
-  const wrapper = new THREE.Group();
-  wrapper.add(root);
-
+  const transform = new THREE.Group();
+  transform.add(root);
   const display = model.display;
   if (display) {
     if (display.translation) {
-      wrapper.position.set(display.translation[0] / 16, display.translation[1] / 16, display.translation[2] / 16);
+      transform.position.set(display.translation[0] / 16, display.translation[1] / 16, display.translation[2] / 16);
     }
     if (display.rotation) {
-      wrapper.rotation.set(display.rotation[0] * DEG, display.rotation[1] * DEG, display.rotation[2] * DEG);
+      transform.rotation.set(display.rotation[0] * DEG, display.rotation[1] * DEG, display.rotation[2] * DEG);
     }
     if (display.scale) {
-      wrapper.scale.set(display.scale[0], display.scale[1], display.scale[2]);
+      transform.scale.set(display.scale[0], display.scale[1], display.scale[2]);
     }
   }
-  return wrapper;
+
+  const outer = new THREE.Group();
+  outer.position.set(0.5, 0.5, 0.5);
+  outer.add(transform);
+  return outer;
 }
 
-/** Resolve and build the Three.js model for a part, or null if the pack has no model for it. */
-export function buildPartModel(pack: ResourcePack, part: PartDef): THREE.Object3D | null {
+/**
+ * Resolve and build the Three.js model for a part, or null if the pack has no model for it.
+ * `tintOverride` (a chosen paint colour) wins over the part's own colour for colourable parts.
+ */
+export function buildPartModel(
+  pack: ResourcePack,
+  part: PartDef,
+  tintOverride?: [number, number, number] | null,
+): THREE.Object3D | null {
   const modelId = part.itemModel ?? resolveModelId(pack, part.baseMaterial, part.customModelData);
   if (!modelId) return null;
   const model = resolveModel(pack, modelId);
   if (!model) return null;
-  const tint = part.color
-    ? new THREE.Color().setRGB(part.color[0] / 255, part.color[1] / 255, part.color[2] / 255, THREE.SRGBColorSpace)
+  const rgb = part.colorable && tintOverride ? tintOverride : part.color;
+  const tint = rgb
+    ? new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace)
     : undefined;
   return buildModelObject(model, pack, tint);
 }

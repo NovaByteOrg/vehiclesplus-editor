@@ -9,8 +9,10 @@ import type { ResourcePack } from "@/lib/resourcepack";
 
 const DEG = Math.PI / 180;
 
-function Part({ part, pack }: { part: PartDef; pack?: ResourcePack | null }) {
-  const model = useMemo(() => (pack ? buildPartModel(pack, part) : null), [pack, part]);
+type Tint = [number, number, number] | null;
+
+function Part({ part, pack, tint }: { part: PartDef; pack?: ResourcePack | null; tint?: Tint }) {
+  const model = useMemo(() => (pack ? buildPartModel(pack, part, tint) : null), [pack, part, tint]);
   const [x, y, z] = part.offset;
   const [pitch, yaw, roll] = part.rotation ?? [0, 0, 0];
 
@@ -25,11 +27,14 @@ function Part({ part, pack }: { part: PartDef; pack?: ResourcePack | null }) {
 
   const [sx, sy, sz] = part.scale ?? [1, 1, 1];
   const mat = MATERIAL_COLORS[part.baseMaterial ?? ""] ?? { color: "#b07d4f" };
+  // Colourable parts follow the chosen paint (or their own colour) even in box mode.
+  const paint = part.colorable ? (tint ?? part.color) : undefined;
+  const color = paint ? `rgb(${paint[0]},${paint[1]},${paint[2]})` : mat.color;
   return (
     <mesh position={[x, y, z]} rotation={[pitch * DEG, yaw * DEG, roll * DEG]} scale={[sx, sy, sz]} castShadow>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial
-        color={mat.color}
+        color={color}
         transparent={mat.opacity != null}
         opacity={mat.opacity ?? 1}
         metalness={0.2}
@@ -42,9 +47,11 @@ function Part({ part, pack }: { part: PartDef; pack?: ResourcePack | null }) {
 export default function VehicleViewer({
   definition,
   pack,
+  tint,
 }: {
   definition: VehicleDefinition;
   pack?: ResourcePack | null;
+  tint?: Tint;
 }) {
   return (
     <Canvas shadows camera={{ position: [3, 2.4, 3.4], fov: 50 }}>
@@ -55,7 +62,7 @@ export default function VehicleViewer({
       <Bounds key={definition.id} fit clip observe margin={1.3}>
         <group>
           {definition.parts.map((part) => (
-            <Part key={part.id} part={part} pack={pack} />
+            <Part key={part.id} part={part} pack={pack} tint={tint} />
           ))}
         </group>
       </Bounds>

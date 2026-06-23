@@ -6,6 +6,7 @@ import ResourcePackPicker from "@/components/ResourcePackPicker";
 import {
   exportDefinitions,
   fetchResourcePackFile,
+  loadDemo,
   loadPluginFolder,
   loadVehicleFiles,
   type LoadedVehicle,
@@ -28,6 +29,7 @@ export default function MigrationWorkspace() {
   const [pack, setPack] = useState<ResourcePack | null>(null);
   const [packFile, setPackFile] = useState<File | null>(null);
   const [showModels, setShowModels] = useState(true);
+  const [tint, setTint] = useState<[number, number, number] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const configInput = useRef<HTMLInputElement>(null);
@@ -41,7 +43,25 @@ export default function MigrationWorkspace() {
     }
   }, []);
 
+  // Reset the chosen paint colour when switching vehicles.
+  useEffect(() => setTint(null), [selected]);
+
   const current = vehicles[selected] ?? null;
+
+  async function loadDemoVehicle() {
+    setBusy(true);
+    try {
+      const { vehicle, packFile: file } = await loadDemo();
+      setPack(await loadResourcePack(file));
+      setPackFile(file);
+      setVehicles((prev) => [...prev, vehicle]);
+      setErrors([]);
+    } catch (e) {
+      setErrors([`Demo failed to load: ${e instanceof Error ? e.message : String(e)}`]);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onConfigFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -189,6 +209,7 @@ export default function MigrationWorkspace() {
         <EmptyState
           onUploadFolder={() => folderInput.current?.click()}
           onAdd={() => configInput.current?.click()}
+          onSample={loadDemoVehicle}
           errors={errors}
         />
       ) : (
@@ -232,6 +253,7 @@ export default function MigrationWorkspace() {
                 key={current.definition.id}
                 definition={current.definition}
                 pack={showModels ? pack : null}
+                tint={tint}
               />
             )}
             <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between p-3">
@@ -295,6 +317,41 @@ export default function MigrationWorkspace() {
                   );
                 })}
               </ul>
+
+              {current.definition.colors && current.definition.colors.length > 0 && (
+                <>
+                  <h3 className="mb-2 mt-4 text-xs uppercase tracking-wide text-neutral-500">
+                    Paint ({current.definition.colors.length})
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      onClick={() => setTint(null)}
+                      className={`h-6 rounded px-2 text-xs ${
+                        tint === null
+                          ? "bg-neutral-700 text-neutral-100"
+                          : "bg-neutral-900 text-neutral-400 hover:bg-neutral-800"
+                      }`}
+                    >
+                      auto
+                    </button>
+                    {current.definition.colors.map((c, i) => {
+                      const active = tint != null && tint[0] === c[0] && tint[1] === c[1] && tint[2] === c[2];
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setTint(c)}
+                          title={`rgb(${c[0]}, ${c[1]}, ${c[2]})`}
+                          style={{ backgroundColor: `rgb(${c[0]},${c[1]},${c[2]})` }}
+                          className={`h-6 w-6 rounded border ${
+                            active ? "border-amber-400 ring-1 ring-amber-400" : "border-neutral-700"
+                          }`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs text-neutral-600">Tints colourable parts (model tintindex faces).</p>
+                </>
+              )}
             </aside>
           )}
         </div>
@@ -322,10 +379,12 @@ function Row({ k, v }: { k: string; v: string }) {
 function EmptyState({
   onUploadFolder,
   onAdd,
+  onSample,
   errors,
 }: {
   onUploadFolder: () => void;
   onAdd: () => void;
+  onSample: () => void;
   errors: string[];
 }) {
   return (
@@ -346,6 +405,10 @@ function EmptyState({
           or{" "}
           <button onClick={onAdd} className="underline hover:text-neutral-300">
             add config files manually
+          </button>{" "}
+          ·{" "}
+          <button onClick={onSample} className="underline hover:text-neutral-300">
+            try the demo
           </button>
         </p>
         <p className="text-xs text-neutral-600">

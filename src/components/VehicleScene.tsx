@@ -17,13 +17,15 @@ const VehicleViewer = dynamic(() => import("./VehicleViewer"), {
 export default function VehicleScene({
   definition,
   pack,
+  tint,
 }: {
   definition: VehicleDefinition;
   pack?: ResourcePack | null;
+  tint?: [number, number, number] | null;
 }) {
   return (
     <div className="absolute inset-0">
-      <VehicleViewer definition={definition} pack={pack} />
+      <VehicleViewer definition={definition} pack={pack} tint={tint} />
     </div>
   );
 }

@@ -1,0 +1,16 @@
+{
+  name: default
+  skin:
+  {
+    material: LEATHER_CHESTPLATE
+    custommodeldata: 1
+    color:
+    {
+      red: 160
+      green: 101
+      blue: 64
+    }
+  }
+  position: HEAD
+  price: 1000
+}

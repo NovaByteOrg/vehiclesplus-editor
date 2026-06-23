@@ -57,6 +57,7 @@ export interface V3VehicleModel {
   acceleration?: V3Upgradable;
   turningRadius?: V3Upgradable;
   parts?: V3Part[];
+  availableColors?: { red?: number; green?: number; blue?: number }[];
 }
 
 const SEAT_TYPES = new Set(["seat", "bikeseat", "turretseat", "controllable"]);
@@ -119,11 +120,12 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
           colorable: false,
         });
       } else {
+        // No rim model resolved — a placeholder at the same HEAD height as real parts.
         parts.push({
           id: `wheel_${index}`,
-          offset: [x, y, z],
+          offset: [x, y + HEAD_Y_OFFSET, z],
           rotation: [0, rotation, 0],
-          scale: [0.25, 0.9, 0.9],
+          scale: [0.25, 0.6, 0.6],
           baseMaterial: "COAL_BLOCK",
           colorable: false,
         });
@@ -162,6 +164,9 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     },
     parts,
     seats,
+    colors: (model.availableColors ?? []).map(
+      (c) => [c.red ?? 0, c.green ?? 0, c.blue ?? 0] as [number, number, number],
+    ),
   };
 }
 
@@ -185,6 +190,12 @@ export const SAMPLE_V3_HJSON = `{
       {
         material: LEATHER_BOOTS
         custommodeldata: 1
+        color:
+        {
+          red: 255
+          green: 255
+          blue: 255
+        }
       }
       position: HEAD
     }
@@ -243,4 +254,27 @@ export const SAMPLE_V3_HJSON = `{
   {
     base: 7
   }
+  availableColors:
+  [
+    {
+      red: 200
+      green: 40
+      blue: 40
+    }
+    {
+      red: 40
+      green: 90
+      blue: 200
+    }
+    {
+      red: 245
+      green: 245
+      blue: 245
+    }
+    {
+      red: 30
+      green: 30
+      blue: 30
+    }
+  ]
 }`;

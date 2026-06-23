@@ -48,6 +48,8 @@ export interface VehicleDefinition {
   physics?: VehiclePhysics;
   parts: PartDef[];
   seats?: SeatDef[];
+  /** Selectable paint colours (RGB 0-255), from V3 availableColors. */
+  colors?: [number, number, number][];
 }
 
 /**

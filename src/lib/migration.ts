@@ -37,6 +37,20 @@ export async function loadVehicleFiles(files: FileList | File[], rims?: Map<stri
   return { vehicles, errors };
 }
 
+/** Load the bundled demo (real ExampleCar + its rim + the example resource pack from `public/demo`). */
+export async function loadDemo(): Promise<{ vehicle: LoadedVehicle; packFile: File }> {
+  const [packBlob, carText, rimText] = await Promise.all([
+    fetch("/demo/pack.zip").then((r) => r.blob()),
+    fetch("/demo/ExampleCar.hjson").then((r) => r.text()),
+    fetch("/demo/rim-default.hjson").then((r) => r.text()),
+  ]);
+  const rim = Hjson.parse(rimText) as { name?: string; skin?: { material?: string; custommodeldata?: number } };
+  const rims = new Map<string, RimItem>();
+  if (rim.name) rims.set(rim.name, { material: rim.skin?.material, customModelData: rim.skin?.custommodeldata });
+  const packFile = new File([packBlob], "pack.zip", { type: "application/zip" });
+  return { vehicle: { fileName: "ExampleCar.hjson", definition: convertText(carText, rims) }, packFile };
+}
+
 /** Load the rim designs (`rims/*.hjson`) into a map of rimDesignId → its skin item (material + CMD). */
 export async function loadRimDesigns(files: FileList | File[]): Promise<Map<string, RimItem>> {
   const rims = new Map<string, RimItem>();

@@ -36,8 +36,22 @@ export interface McModel {
   overrides?: { predicate?: Record<string, number>; model?: string }[];
 }
 
+/** A 1.21.x item definition (`assets/<ns>/items/<id>.json`): a model-selection tree. */
+export interface McItemModelNode {
+  type?: string;
+  model?: string | McItemModelNode;
+  property?: string;
+  entries?: { threshold?: number; model?: McItemModelNode }[];
+  fallback?: McItemModelNode;
+}
+
+export interface McItemDefinition {
+  model?: McItemModelNode;
+}
+
 export interface ResourcePack {
   models: Map<string, McModel>; // "ns:path" -> model JSON
+  items: Map<string, McItemDefinition>; // "ns:id" -> item definition (1.21.x)
   textures: Map<string, string>; // "ns:path" -> object URL (png)
 }
 
@@ -55,11 +69,17 @@ function normalizeId(id: string): string {
 export async function loadResourcePack(file: File | Blob): Promise<ResourcePack> {
   const zip = await JSZip.loadAsync(file);
   const models = new Map<string, McModel>();
+  const items = new Map<string, McItemDefinition>();
   const textures = new Map<string, string>();
 
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
-    const model = entry.name.match(/^assets\/([^/]+)\/models\/(.+)\.json$/);
+    // Tolerate a wrapping folder (PackName/assets/...): read from "assets/" onwards.
+    const assetsAt = entry.name.indexOf("assets/");
+    if (assetsAt < 0) continue;
+    const name = entry.name.slice(assetsAt);
+
+    const model = name.match(/^assets\/([^/]+)\/models\/(.+)\.json$/);
     if (model) {
       try {
         models.set(`${model[1]}:${model[2]}`, JSON.parse(await entry.async("string")));
@@ -68,13 +88,22 @@ export async function loadResourcePack(file: File | Blob): Promise<ResourcePack>
       }
       continue;
     }
-    const texture = entry.name.match(/^assets\/([^/]+)\/textures\/(.+)\.png$/);
+    const item = name.match(/^assets\/([^/]+)\/items\/(.+)\.json$/);
+    if (item) {
+      try {
+        items.set(`${item[1]}:${item[2]}`, JSON.parse(await entry.async("string")));
+      } catch {
+        // skip malformed item definition
+      }
+      continue;
+    }
+    const texture = name.match(/^assets\/([^/]+)\/textures\/(.+)\.png$/);
     if (texture) {
       const blob = await entry.async("blob");
       textures.set(`${texture[1]}:${texture[2]}`, URL.createObjectURL(blob));
     }
   }
-  return { models, textures };
+  return { models, items, textures };
 }
 
 /**
@@ -87,19 +116,53 @@ export function resolveModelId(
   cmd: number | undefined,
 ): string | null {
   if (!material) return null;
-  const itemModel = pack.models.get(`minecraft:item/${material.toLowerCase()}`);
-  if (!itemModel?.overrides || cmd == null) return null;
+  const lower = material.toLowerCase();
 
-  let best: string | null = null;
-  let bestValue = -Infinity;
-  for (const override of itemModel.overrides) {
-    const value = override.predicate?.custom_model_data;
-    if (value != null && override.model != null && value <= cmd && value >= bestValue) {
-      bestValue = value;
-      best = override.model;
+  // Old format: `overrides` on the vanilla item model.
+  const itemModel = pack.models.get(`minecraft:item/${lower}`);
+  if (itemModel?.overrides && cmd != null) {
+    let best: string | null = null;
+    let bestValue = -Infinity;
+    for (const override of itemModel.overrides) {
+      const value = override.predicate?.custom_model_data;
+      if (value != null && override.model != null && value <= cmd && value >= bestValue) {
+        bestValue = value;
+        best = override.model;
+      }
     }
+    if (best) return best;
   }
-  return best;
+
+  // New (1.21.x) format: `items/<material>.json` with a model-selection tree.
+  const itemDef = pack.items.get(`minecraft:${lower}`);
+  if (itemDef && cmd != null) {
+    const fromTree = resolveItemModelTree(itemDef.model, cmd);
+    if (fromTree) return fromTree;
+  }
+
+  return null;
+}
+
+function resolveItemModelTree(node: McItemModelNode | undefined, cmd: number, depth = 0): string | null {
+  if (!node || depth > 16) return null;
+  if (typeof node.model === "string") return node.model;
+
+  const type = (node.type ?? "").replace("minecraft:", "");
+  if (type === "range_dispatch" && (node.property ?? "").replace("minecraft:", "") === "custom_model_data") {
+    let best: McItemModelNode | undefined;
+    let bestThreshold = -Infinity;
+    for (const entry of node.entries ?? []) {
+      if (entry.threshold != null && entry.threshold <= cmd && entry.threshold >= bestThreshold) {
+        bestThreshold = entry.threshold;
+        best = entry.model;
+      }
+    }
+    return resolveItemModelTree(best ?? node.fallback, cmd, depth + 1);
+  }
+
+  if (node.fallback) return resolveItemModelTree(node.fallback, cmd, depth + 1);
+  if (node.model && typeof node.model !== "string") return resolveItemModelTree(node.model, cmd, depth + 1);
+  return null;
 }
 
 /** Load a model and flatten its `parent` chain (merge textures; inherit elements + head display). */

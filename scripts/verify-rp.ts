@@ -19,6 +19,7 @@ const pack: ResourcePack = {
       },
     ],
   ]),
+  items: new Map(),
   textures: new Map([["vehiclesplus:car/body", "blob:body-url"]]),
 };
 

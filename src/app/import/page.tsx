@@ -6,14 +6,16 @@ import { useState } from "react";
 import VehicleScene from "@/components/VehicleScene";
 import ResourcePackPicker from "@/components/ResourcePackPicker";
 import type { VehicleDefinition } from "@/lib/vehicle";
-import type { ResourcePack } from "@/lib/resourcepack";
+import { resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 import { convertV3Model, SAMPLE_V3_HJSON, type V3VehicleModel } from "@/lib/v3";
+import { generateV4Pack } from "@/lib/generate-pack";
 
 export default function ImportPage() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState<VehicleDefinition | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pack, setPack] = useState<ResourcePack | null>(null);
+  const [packFile, setPackFile] = useState<File | null>(null);
 
   function convert(text: string) {
     try {
@@ -31,15 +33,25 @@ export default function ImportPage() {
     convert(SAMPLE_V3_HJSON);
   }
 
-  function download() {
-    if (!result) return;
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+  function saveBlob(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${result.id}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function download() {
+    if (!result) return;
+    saveBlob(new Blob([JSON.stringify(result, null, 2)], { type: "application/json" }), `${result.id}.json`);
+  }
+
+  async function generatePack() {
+    if (!result || !pack || !packFile) return;
+    const { blob, definition } = await generateV4Pack(packFile, pack, result);
+    saveBlob(blob, `${result.id}-v4-pack.zip`);
+    setResult(definition); // now references item_model keys
   }
 
   return (
@@ -53,7 +65,12 @@ export default function ImportPage() {
             Import <span className="text-amber-400">V3</span>
           </span>
         </div>
-        <ResourcePackPicker onLoad={setPack} />
+        <ResourcePackPicker
+          onLoad={(loaded, file) => {
+            setPack(loaded);
+            setPackFile(file ?? null);
+          }}
+        />
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -77,6 +94,13 @@ export default function ImportPage() {
               className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
             >
               Export V4 JSON
+            </button>
+            <button
+              onClick={generatePack}
+              disabled={!result || !pack || !packFile}
+              className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
+            >
+              Generate V4 pack
             </button>
           </div>
           <textarea
@@ -110,12 +134,21 @@ export default function ImportPage() {
               {result.parts.length} parts · {result.seats?.length ?? 0} seats · type {result.type}
             </p>
             <ul className="space-y-1">
-              {result.parts.map((p) => (
-                <li key={p.id} className="flex justify-between rounded bg-neutral-900 px-2 py-1">
-                  <span className="text-neutral-300">{p.id}</span>
-                  <span className="text-neutral-500">cmd {p.customModelData ?? "—"}</span>
-                </li>
-              ))}
+              {result.parts.map((p) => {
+                const matched = pack ? resolveModelId(pack, p.baseMaterial, p.customModelData) : null;
+                return (
+                  <li key={p.id} className="flex justify-between rounded bg-neutral-900 px-2 py-1">
+                    <span className="text-neutral-300">{p.id}</span>
+                    {pack ? (
+                      <span className={matched ? "text-green-400" : "text-red-400"}>
+                        {matched ? "model ✓" : "no model"}
+                      </span>
+                    ) : (
+                      <span className="text-neutral-500">cmd {p.customModelData ?? "—"}</span>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
             <p className="mt-4 leading-relaxed text-neutral-600">
               Offsets/scale are best-effort from V3 armor-stand head items — fine-tune visually once

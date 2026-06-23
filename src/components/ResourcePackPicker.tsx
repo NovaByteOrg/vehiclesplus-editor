@@ -3,7 +3,11 @@
 import { useRef, useState } from "react";
 import { loadResourcePack, type ResourcePack } from "@/lib/resourcepack";
 
-export default function ResourcePackPicker({ onLoad }: { onLoad: (pack: ResourcePack | null) => void }) {
+export default function ResourcePackPicker({
+  onLoad,
+}: {
+  onLoad: (pack: ResourcePack | null, file?: File) => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [label, setLabel] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -14,8 +18,8 @@ export default function ResourcePackPicker({ onLoad }: { onLoad: (pack: Resource
     setLoading(true);
     try {
       const pack = await loadResourcePack(file);
-      onLoad(pack);
-      setLabel(`${file.name} · ${pack.models.size} models`);
+      onLoad(pack, file);
+      setLabel(`${pack.models.size} models · ${pack.items.size} items · ${pack.textures.size} tex`);
     } catch {
       onLoad(null);
       setLabel("failed to load");

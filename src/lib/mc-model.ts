@@ -11,13 +11,11 @@ import {
   resolveModel,
   resolveModelId,
   resolveTexture,
-  resolveTextureRef,
   type McElement,
   type McFace,
   type ResolvedModel,
   type ResourcePack,
 } from "./resourcepack";
-import { vanillaBlockColor } from "./vanilla-colors";
 import type { PartDef } from "./vehicle";
 
 const DEG = Math.PI / 180;
@@ -39,7 +37,7 @@ function texture(url: string): THREE.Texture {
   return tex;
 }
 
-function faceMaterial(url: string | null, baseHex: string | null, tint?: THREE.Color): THREE.Material {
+function faceMaterial(url: string | null, tint?: THREE.Color): THREE.Material {
   if (url) {
     return new THREE.MeshStandardMaterial({
       map: texture(url),
@@ -50,17 +48,10 @@ function faceMaterial(url: string | null, baseHex: string | null, tint?: THREE.C
       side: THREE.DoubleSide,
     });
   }
-  // No PNG in the pack (e.g. a vanilla block): use its representative colour, tinted if applicable.
-  const color = new THREE.Color(baseHex ?? FALLBACK_HEX);
+  // No PNG anywhere (a custom texture the pack doesn't ship): neutral fallback, tinted if applicable.
+  const color = new THREE.Color(FALLBACK_HEX);
   if (tint) color.multiply(tint);
   return new THREE.MeshStandardMaterial({ color, roughness: 1, metalness: 0, side: THREE.DoubleSide });
-}
-
-/** A face's loaded texture URL (or null) plus, when there's no PNG, a vanilla-block fallback colour. */
-function faceTextures(pack: ResourcePack, textures: Record<string, string>, ref: string) {
-  const url = resolveTexture(pack, textures, ref);
-  const baseHex = url ? null : vanillaBlockColor(resolveTextureRef(textures, ref) ?? "");
-  return { url, baseHex };
 }
 
 /** Face corners (block units) viewed face-on, ordered top-left, top-right, bottom-right, bottom-left. */
@@ -120,8 +111,7 @@ function buildFace(
   geometry.computeVertexNormals();
 
   const faceTint = mcFace.tintindex != null && mcFace.tintindex >= 0 ? tint : undefined;
-  const { url, baseHex } = faceTextures(pack, model.textures, mcFace.texture);
-  return new THREE.Mesh(geometry, faceMaterial(url, baseHex, faceTint));
+  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture), faceTint));
 }
 
 function buildElement(
@@ -158,8 +148,7 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
   const ref =
     model.textures.layer0 ?? model.textures["0"] ?? model.textures.particle ?? Object.values(model.textures)[0];
   if (!ref) return null;
-  const { url, baseHex } = faceTextures(pack, model.textures, ref);
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(url, baseHex));
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(resolveTexture(pack, model.textures, ref)));
   mesh.position.set(0.5, 0.5, 0.5); // centred after the -0.5 model-space shift
   return mesh;
 }

@@ -190,7 +190,23 @@ export function resolveModel(pack: ResourcePack, modelId: string, depth = 0): Re
   return { textures, elements: elements ?? [], display };
 }
 
-/** Resolve a face's `#ref` texture to a loaded object URL, following texture-variable chains. */
+/**
+ * Vanilla Minecraft assets mirror (jsDelivr, CORS-enabled). V3 models are often built from vanilla
+ * blocks (concrete, iron, bedrock…) whose textures ship with the game, not the pack — we load those
+ * straight from here so the editor renders the real textures. Block textures are stable across 1.21.x.
+ */
+export const VANILLA_ASSETS = "https://cdn.jsdelivr.net/gh/InventivetalentDev/minecraft-assets@1.21.4/assets";
+
+/** A `minecraft:`-namespaced texture's URL on the vanilla mirror (e.g. `block/white_concrete`). */
+export function vanillaTextureUrl(id: string): string | null {
+  const [ns, path] = normalizeId(id).split(":");
+  return ns === "minecraft" ? `${VANILLA_ASSETS}/minecraft/textures/${path}.png` : null;
+}
+
+/**
+ * Resolve a face's `#ref` texture to a loaded URL, following texture-variable chains. Falls back to
+ * the vanilla asset mirror for `minecraft:` textures the pack doesn't ship (V3 vanilla-block models).
+ */
 export function resolveTexture(
   pack: ResourcePack,
   textures: Record<string, string>,
@@ -198,7 +214,8 @@ export function resolveTexture(
   depth = 0,
 ): string | null {
   const id = resolveTextureRef(textures, ref);
-  return id ? (pack.textures.get(normalizeId(id)) ?? null) : null;
+  if (!id) return null;
+  return pack.textures.get(normalizeId(id)) ?? vanillaTextureUrl(id);
 }
 
 /**

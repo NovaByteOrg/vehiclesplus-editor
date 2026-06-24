@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Hjson from "hjson";
 import VehicleScene from "@/components/VehicleScene";
 import ResourcePackPicker from "@/components/ResourcePackPicker";
+import ConfigForm from "@/components/ConfigForm";
 import {
   CATEGORY_LABELS,
   createEntry,
@@ -430,17 +431,24 @@ function Inspector({
         </div>
       )}
 
-      <div className="flex items-center justify-between px-4 pt-2 text-[11px] uppercase tracking-wide text-neutral-500">
-        <span>{entry.category === "config" ? "config.yml" : "Config (HJSON)"}</span>
-        {parseError ? <span className="text-red-400">invalid</span> : <span className="text-green-500">ok</span>}
+      <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-neutral-500">
+        {entry.category === "config" ? "Settings (config.yml)" : "Properties"}
       </div>
-      <textarea
-        value={entry.text}
-        onChange={(e) => onText(e.target.value)}
-        spellCheck={false}
-        className="m-3 mt-1 flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 p-3 font-mono text-xs text-neutral-200 outline-none focus:border-neutral-600"
-      />
-      {parseError && <div className="mx-3 mb-3 rounded bg-red-950/40 px-2 py-1 text-[11px] text-red-300">{parseError}</div>}
+      {parseError && entry.category === "vehicle" && (
+        <div className="mx-3 mb-1 rounded bg-red-950/40 px-2 py-1 text-[11px] text-red-300">{parseError}</div>
+      )}
+      <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+        {entry.category === "config" ? (
+          <textarea
+            value={entry.text}
+            onChange={(e) => onText(e.target.value)}
+            spellCheck={false}
+            className="flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 p-3 font-mono text-xs text-neutral-200 outline-none focus:border-neutral-600"
+          />
+        ) : (
+          <ConfigForm key={entry.id} text={entry.text} onChange={onText} />
+        )}
+      </div>
     </aside>
   );
 }

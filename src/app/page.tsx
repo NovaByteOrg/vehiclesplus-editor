@@ -1,5 +1,5 @@
-import MigrationWorkspace from "@/components/MigrationWorkspace";
+import EditorWorkspace from "@/components/EditorWorkspace";
 
 export default function Home() {
-  return <MigrationWorkspace />;
+  return <EditorWorkspace />;
 }

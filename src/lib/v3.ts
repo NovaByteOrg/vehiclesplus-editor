@@ -99,8 +99,9 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     // V3 part offsets live in a frame rotated 90° from the model frame: the vehicle models have their
     // length along Z, but the config puts front/back along X. Rotate (x,z) by 90° so wheels/seats line
     // up with the body. Only the anchor positions move — each part model keeps its own orientation.
-    const x = -rawZ;
-    const z = rawX;
+    // (x,z) -> (z,-x): maps the config's front (+x) to the body model's front (-z).
+    const x = rawZ;
+    const z = -rawX;
 
     if (SEAT_TYPES.has(type)) {
       seats.push({

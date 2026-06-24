@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
+import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, Grid, OrbitControls } from "@react-three/drei";
 import { MATERIAL_COLORS, type PartDef, type VehicleDefinition } from "@/lib/vehicle";
@@ -44,6 +45,28 @@ function Part({ part, pack, tint }: { part: PartDef; pack?: ResourcePack | null;
   );
 }
 
+/** Renders the parts and drops the whole vehicle so its lowest point rests on the grid (y = 0). */
+function GroundedVehicle({ definition, pack, tint }: { definition: VehicleDefinition; pack?: ResourcePack | null; tint?: Tint }) {
+  const ref = useRef<THREE.Group>(null);
+
+  useLayoutEffect(() => {
+    const group = ref.current;
+    if (!group) return;
+    group.position.y = 0;
+    group.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(group);
+    if (Number.isFinite(box.min.y)) group.position.y = -box.min.y; // sit the lowest point on the floor
+  });
+
+  return (
+    <group ref={ref}>
+      {definition.parts.map((part) => (
+        <Part key={part.id} part={part} pack={pack} tint={tint} />
+      ))}
+    </group>
+  );
+}
+
 export default function VehicleViewer({
   definition,
   pack,
@@ -60,15 +83,11 @@ export default function VehicleViewer({
       <directionalLight position={[6, 10, 6]} intensity={1.1} castShadow />
       {/* Auto-frame whatever is loaded so it's never off-screen; refit when the vehicle changes. */}
       <Bounds key={definition.id} fit clip observe margin={1.3}>
-        <group>
-          {definition.parts.map((part) => (
-            <Part key={part.id} part={part} pack={pack} tint={tint} />
-          ))}
-        </group>
+        <GroundedVehicle definition={definition} pack={pack} tint={tint} />
       </Bounds>
       <Grid
         args={[24, 24]}
-        position={[0, -0.001, 0]}
+        position={[0, 0, 0]}
         cellColor="#333333"
         sectionColor="#555555"
         fadeDistance={30}

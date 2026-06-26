@@ -104,9 +104,11 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     const z = -rawX;
 
     if (SEAT_TYPES.has(type)) {
+      // A rider mounted on the seat's (armor-stand) anchor sits ~height×0.75 ≈ 1.48 above it — close
+      // enough to the head-item lift — so raise the seat marker by HEAD_Y_OFFSET to match the visible car.
       seats.push({
         id: `seat_${seats.length + 1}`,
-        offset: [x, y, z],
+        offset: [x, y + HEAD_Y_OFFSET, z],
         driver: part.steer === true,
         sourceIndex: index,
       });

@@ -137,7 +137,9 @@ export default function EditorWorkspace() {
     }
     const part = obj.parts?.[index];
     if (!part) return;
-    const head = kind === "seat" ? 0 : HEAD_Y_OFFSET;
+    // Both parts and seats bake the same +HEAD_Y_OFFSET into their display Y (head-item lift / rider mount), so reverse it for both.
+    void kind;
+    const head = HEAD_Y_OFFSET;
     const r = (n: number) => Math.round(n * 1000) / 1000;
     part.xoffset = r(-offset[2]); // reverse (x,z)->(-z,-x) and the head-bone y offset
     part.yoffset = r(offset[1] - head);

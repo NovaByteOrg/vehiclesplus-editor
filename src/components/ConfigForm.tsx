@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import Hjson from "hjson";
+import { COMMON_MATERIALS, ENUM_FOR_KEY, PLUGIN_ENUMS } from "@/lib/plugin-enums";
+
+const MATERIALS_LIST_ID = "vp-materials-list";
 
 /**
  * A structured, form-based editor for a VehiclesPlus config. Parses the HJSON once and renders nice
@@ -83,13 +86,44 @@ function ColorField({ value, onChange }: { value: { red?: number; green?: number
   );
 }
 
-function Field({ value, onChange }: { value: Json; onChange: (v: Json) => void }) {
+function SelectField({ value, options, onChange }: { value: string; options: readonly string[]; onChange: (v: Json) => void }) {
+  const opts = options.includes(value) ? options : [value, ...options]; // keep an unknown current value selectable
+  return (
+    <select className={`${inputCls} w-full`} value={value} onChange={(e) => onChange(e.target.value)}>
+      {opts.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function MaterialField({ value, onChange }: { value: string; onChange: (v: Json) => void }) {
+  // Bukkit Material is a huge, version-specific enum, so this stays free text with suggestions.
+  return (
+    <input
+      className={`${inputCls} w-full`}
+      value={value}
+      list={MATERIALS_LIST_ID}
+      spellCheck={false}
+      onChange={(e) => onChange(e.target.value.toUpperCase())}
+    />
+  );
+}
+
+function Field({ value, onChange, fieldKey }: { value: Json; onChange: (v: Json) => void; fieldKey?: string }) {
   if (isColor(value)) return <ColorField value={value} onChange={onChange} />;
-  if (Array.isArray(value)) return <ArrayField value={value} onChange={onChange} />;
+  if (Array.isArray(value)) return <ArrayField value={value} onChange={onChange} fieldKey={fieldKey} />;
   if (isPlainObject(value)) return <ObjectField value={value} onChange={onChange} />;
   if (typeof value === "boolean") return <BoolField value={value} onChange={onChange} />;
   if (typeof value === "number") return <NumberField value={value} onChange={onChange} />;
-  return <TextField value={value == null ? "" : String(value)} onChange={onChange} />;
+  // String/null: prefer a dropdown for known finite-choice fields, then a material autocomplete.
+  const str = value == null ? "" : String(value);
+  if (fieldKey === "material") return <MaterialField value={str} onChange={onChange} />;
+  const enumKey = fieldKey ? ENUM_FOR_KEY[fieldKey] : undefined;
+  if (enumKey) return <SelectField value={str} options={PLUGIN_ENUMS[enumKey]} onChange={onChange} />;
+  return <TextField value={str} onChange={onChange} />;
 }
 
 /** A primitive is shown inline (label + control on one row); objects/arrays get their own block. */
@@ -108,14 +142,14 @@ function ObjectField({ value, onChange, top }: { value: Record<string, Json>; on
           return (
             <div key={key} className="flex items-center justify-between gap-3">
               <label className="shrink-0 text-xs text-neutral-400">{labelize(key)}</label>
-              <Field value={v} onChange={set} />
+              <Field value={v} onChange={set} fieldKey={key} />
             </div>
           );
         }
         return (
           <div key={key} className="rounded border border-neutral-800 bg-neutral-900/40 p-2">
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500">{labelize(key)}</div>
-            <Field value={v} onChange={set} />
+            <Field value={v} onChange={set} fieldKey={key} />
           </div>
         );
       })}
@@ -135,13 +169,19 @@ function templateFrom(items: Json[]): Json {
   return "";
 }
 
-function ArrayField({ value, onChange }: { value: Json[]; onChange: (v: Json) => void }) {
+function ArrayField({ value, onChange, fieldKey }: { value: Json[]; onChange: (v: Json) => void; fieldKey?: string }) {
+  const enumKey = fieldKey ? ENUM_FOR_KEY[fieldKey] : undefined;
+  const addItem = () => onChange([...value, enumKey ? PLUGIN_ENUMS[enumKey][0] : value.length ? templateFrom(value) : ""]);
   return (
     <div className="space-y-1.5">
       {value.map((item, i) => (
         <div key={i} className="flex items-start gap-2">
           <div className="flex-1">
-            <Field value={item} onChange={(nv) => onChange(value.map((it, j) => (j === i ? nv : it)))} />
+            <Field
+              value={item}
+              onChange={(nv) => onChange(value.map((it, j) => (j === i ? nv : it)))}
+              fieldKey={fieldKey}
+            />
           </div>
           <button
             onClick={() => onChange(value.filter((_, j) => j !== i))}
@@ -153,7 +193,7 @@ function ArrayField({ value, onChange }: { value: Json[]; onChange: (v: Json) =>
         </div>
       ))}
       <button
-        onClick={() => onChange([...value, value.length ? templateFrom(value) : ""])}
+        onClick={addItem}
         className="rounded border border-dashed border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
       >
         + Add
@@ -193,6 +233,11 @@ export default function ConfigForm({ text, onChange }: { text: string; onChange:
 
   return (
     <div className="flex-1 overflow-y-auto pr-1">
+      <datalist id={MATERIALS_LIST_ID}>
+        {COMMON_MATERIALS.map((m) => (
+          <option key={m} value={m} />
+        ))}
+      </datalist>
       <ObjectField value={data} onChange={update} top />
     </div>
   );

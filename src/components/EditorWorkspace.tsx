@@ -21,6 +21,7 @@ import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resou
 import type { VehicleDefinition } from "@/lib/vehicle";
 import { HEAD_Y_OFFSET } from "@/lib/v3";
 import { DEFAULT_THEME, THEMES, themeViewport } from "@/lib/themes";
+import { validateProject } from "@/lib/validate";
 import type { Selection } from "@/components/VehicleViewer";
 
 function saveBlob(blob: Blob, filename: string) {
@@ -57,6 +58,7 @@ export default function EditorWorkspace() {
   const [dirty, setDirty] = useState(false);
   const [revision, setRevision] = useState(0); // bumped on undo/redo to remount the form from reverted data
   const [selection, setSelection] = useState<Selection>(null);
+  const [showProblems, setShowProblems] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
   const lastEditKey = useRef("");
@@ -294,6 +296,8 @@ export default function EditorWorkspace() {
     return map;
   }, [entries]);
 
+  const problems = useMemo(() => validateProject(entries, pack, rims), [entries, pack, rims]);
+
   return (
     <main data-theme={theme} className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
       <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2.5">
@@ -439,6 +443,44 @@ export default function EditorWorkspace() {
 
       {errors.length > 0 && (
         <div className="border-t border-red-900/50 bg-red-950/40 px-4 py-1.5 text-xs text-red-300">{errors[0]}</div>
+      )}
+
+      {entries.length > 0 && (
+        <>
+          {showProblems && problems.length > 0 && (
+            <div className="max-h-48 overflow-y-auto border-t border-neutral-800 bg-neutral-950">
+              {problems.map((p, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setSelectedId(p.entryId);
+                    setShowProblems(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-4 py-1 text-left text-xs hover:bg-neutral-900"
+                >
+                  <span className={p.severity === "error" ? "text-red-400" : "text-amber-400"}>
+                    {p.severity === "error" ? "✕" : "⚠"}
+                  </span>
+                  <span className="shrink-0 font-medium text-neutral-300">{p.entryName}</span>
+                  <span className="truncate text-neutral-500">{p.message}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button
+            onClick={() => setShowProblems((s) => !s)}
+            className="flex w-full items-center gap-2 border-t border-neutral-800 px-4 py-1.5 text-left text-xs hover:bg-neutral-900"
+          >
+            {problems.length === 0 ? (
+              <span className="text-green-500">✓ no problems</span>
+            ) : (
+              <span className="text-amber-400">
+                ⚠ {problems.length} problem{problems.length > 1 ? "s" : ""}
+              </span>
+            )}
+            <span className="ml-auto text-neutral-600">{showProblems ? "▾" : "▴"}</span>
+          </button>
+        </>
       )}
     </main>
   );

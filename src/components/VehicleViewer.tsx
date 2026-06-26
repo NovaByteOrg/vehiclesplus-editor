@@ -260,11 +260,14 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
 export default function VehicleViewer({ definition, pack, tint, viewport, selection, hovered, onSelect, onMove }: ViewerProps) {
   const vp = viewport ?? { bg: "#0a0a0a", grid: "#333333", grid2: "#555555" };
   return (
-    <Canvas shadows camera={{ position: [4.5, 2.2, 4.5], fov: 50 }} onPointerMissed={() => onSelect?.(null)}>
+    <Canvas shadows camera={{ position: [4.5, 2.2, 4.5], fov: 50, near: 0.05, far: 500 }} onPointerMissed={() => onSelect?.(null)}>
       <color attach="background" args={[vp.bg]} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 10, 6]} intensity={1.1} castShadow />
-      <Bounds key={definition.id} fit clip observe margin={1.3}>
+      {/* Frame the vehicle once per vehicle (the key). No `clip`/`observe`: those re-fit and re-clip the
+          camera whenever scene content changes — e.g. when selecting a part mounts the drag gizmo — which
+          could push the vehicle outside the clip planes, leaving only the marker + arrows visible. */}
+      <Bounds key={definition.id} fit margin={1.3}>
         <GroundedVehicle definition={definition} pack={pack} tint={tint} selection={selection} hovered={hovered} onSelect={onSelect} onMove={onMove} />
       </Bounds>
       <Grid args={[24, 24]} position={[0, 0, 0]} cellColor={vp.grid} sectionColor={vp.grid2} fadeDistance={30} infiniteGrid />

@@ -42,8 +42,13 @@ export default function EditorWorkspace() {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(DEFAULT_THEME);
+  const [hist, setHist] = useState<{ past: ProjectEntry[][]; future: ProjectEntry[][] }>({ past: [], future: [] });
+  const [dirty, setDirty] = useState(false);
+  const [revision, setRevision] = useState(0); // bumped on undo/redo to remount the form from reverted data
   const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
+  const lastEditKey = useRef("");
+  const editTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     if (folderInput.current) {
@@ -59,6 +64,66 @@ export default function EditorWorkspace() {
   }
 
   useEffect(() => setTint(null), [selectedId]);
+
+  // ---- history (undo/redo) + dirty tracking ----
+  // Text edits coalesce into one undo step per burst (per entry, 700ms); structural changes snapshot.
+  function commit(next: ProjectEntry[], coalesce = false) {
+    if (!(coalesce && lastEditKey.current === selectedId)) {
+      setHist((h) => ({ past: [...h.past.slice(-99), entries], future: [] }));
+    }
+    if (coalesce) {
+      lastEditKey.current = selectedId ?? "";
+      clearTimeout(editTimer.current);
+      editTimer.current = setTimeout(() => (lastEditKey.current = ""), 700);
+    } else {
+      lastEditKey.current = "";
+    }
+    setEntries(next);
+    setDirty(true);
+  }
+
+  function resetHistory() {
+    setHist({ past: [], future: [] });
+    setDirty(false);
+    lastEditKey.current = "";
+  }
+
+  function undo() {
+    if (!hist.past.length) return;
+    setEntries(hist.past[hist.past.length - 1]);
+    setHist({ past: hist.past.slice(0, -1), future: [entries, ...hist.future] });
+    lastEditKey.current = "";
+    setRevision((r) => r + 1);
+  }
+  function redo() {
+    if (!hist.future.length) return;
+    setEntries(hist.future[0]);
+    setHist({ past: [...hist.past, entries], future: hist.future.slice(1) });
+    lastEditKey.current = "";
+    setRevision((r) => r + 1);
+  }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as HTMLElement | null;
+      // Let form fields keep their own native undo; our history undo is for the file list / structure.
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const z = e.key.toLowerCase() === "z";
+      if (mod && z && !e.shiftKey) (e.preventDefault(), undo());
+      else if (mod && (e.key.toLowerCase() === "y" || (z && e.shiftKey))) (e.preventDefault(), redo());
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  useEffect(() => {
+    function warn(e: BeforeUnloadEvent) {
+      if (dirty) (e.preventDefault(), (e.returnValue = ""));
+    }
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   const selected = entries.find((e) => e.id === selectedId) ?? null;
   const rims = useMemo(() => rimMap(entries), [entries]);
@@ -94,6 +159,7 @@ export default function EditorWorkspace() {
       const { entries: loaded, resourcePackUrl, packZip } = await loadProject(files);
       setEntries(loaded);
       setSelectedId(loaded.find((e) => e.category === "vehicle")?.id ?? loaded[0]?.id ?? null);
+      resetHistory();
       const errs: string[] = [];
       if (loaded.length === 0) errs.push("No VehiclesPlus configs found in that folder.");
       try {
@@ -129,6 +195,7 @@ export default function EditorWorkspace() {
       const fuel = createEntry("fuel", "gasoline");
       setEntries([car, rim, fuel]);
       setSelectedId(car.id);
+      resetHistory();
       const file = new File([packBlob], "pack.zip", { type: "application/zip" });
       setPack(await loadResourcePack(file));
       setPackFile(file);
@@ -139,29 +206,31 @@ export default function EditorWorkspace() {
   }
 
   function updateText(text: string) {
-    setEntries((prev) => prev.map((e) => (e.id === selectedId ? { ...e, text } : e)));
+    commit(
+      entries.map((e) => (e.id === selectedId ? { ...e, text } : e)),
+      true,
+    );
   }
 
   function deleteEntry(id: string) {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    const entry = entries.find((e) => e.id === id);
+    if (entry && !window.confirm(`Delete ${entry.name}? You can undo this.`)) return;
+    commit(entries.filter((e) => e.id !== id));
     if (selectedId === id) setSelectedId(null);
   }
 
-  function addEntry(category: Category) {
-    const name = window.prompt(`New ${CATEGORY_LABELS[category].toLowerCase().replace(/s$/, "")} name`)?.trim();
-    if (!name) return;
-    const group =
-      category === "vehicle"
-        ? window.prompt("Vehicle type folder (cars, boats, planes…)", "cars")?.trim() || "cars"
-        : undefined;
-    const entry = createEntry(category, name, group);
-    setEntries((prev) => [...prev, entry]);
+  function addEntry(category: Category, name: string, group?: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const entry = createEntry(category, trimmed, category === "vehicle" ? group || "cars" : undefined);
+    commit([...entries, entry]);
     setSelectedId(entry.id);
   }
 
   async function exportFolder() {
     if (entries.length === 0) return;
     saveBlob(await exportProject(entries), "VehiclesPlus.zip");
+    setDirty(false);
   }
 
   async function generatePack() {
@@ -198,7 +267,27 @@ export default function EditorWorkspace() {
           VehiclesPlus <span className="text-amber-400">Editor</span>
         </span>
         <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">{entries.length} files</span>
+        {dirty && <span className="text-xs text-amber-400">● unsaved</span>}
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            onClick={undo}
+            disabled={hist.past.length === 0}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+            className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-30"
+          >
+            ↶
+          </button>
+          <button
+            onClick={redo}
+            disabled={hist.future.length === 0}
+            title="Redo (Ctrl+Y)"
+            aria-label="Redo"
+            className="rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-30"
+          >
+            ↷
+          </button>
+          <span className="mx-1 h-4 w-px bg-neutral-700" />
           <input
             ref={folderInput}
             type="file"
@@ -291,6 +380,7 @@ export default function EditorWorkspace() {
                 tint={tint}
                 onTint={setTint}
                 onText={updateText}
+                revision={revision}
               />
             ) : (
               <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">
@@ -318,65 +408,112 @@ function Nav({
   grouped: Map<Category, ProjectEntry[]>;
   selectedId: string | null;
   onSelect: (id: string) => void;
-  onAdd: (c: Category) => void;
+  onAdd: (c: Category, name: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [adding, setAdding] = useState<Category | null>(null);
+  const [name, setName] = useState("");
+  const q = query.trim().toLowerCase();
+
+  function submitAdd() {
+    if (adding && name.trim()) onAdd(adding, name);
+    setAdding(null);
+    setName("");
+  }
+
   return (
-    <aside className="w-64 shrink-0 overflow-y-auto border-r border-neutral-800 py-1">
-      {CATEGORY_ORDER.map((category) => {
-        const items = grouped.get(category) ?? [];
-        if (items.length === 0 && category === "config") return null;
-        const byGroup = new Map<string, ProjectEntry[]>();
-        for (const e of items) {
-          const g = e.group ?? "";
-          if (!byGroup.has(g)) byGroup.set(g, []);
-          byGroup.get(g)!.push(e);
-        }
-        return (
-          <div key={category} className="mb-1">
-            <div className="flex items-center justify-between px-3 py-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                {CATEGORY_LABELS[category]} <span className="text-neutral-600">({items.length})</span>
-              </span>
-              {ADDABLE.includes(category) && (
-                <button
-                  onClick={() => onAdd(category)}
-                  title={`Add ${CATEGORY_LABELS[category]}`}
-                  className="rounded px-1.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-amber-400"
-                >
-                  +
-                </button>
-              )}
-            </div>
-            {[...byGroup.entries()].map(([group, groupItems]) => (
-              <div key={group}>
-                {group && <div className="px-4 py-0.5 text-[11px] text-neutral-600">{group}</div>}
-                <ul>
-                  {groupItems.map((e) => (
-                    <li key={e.id} className="group/item flex items-center">
-                      <button
-                        onClick={() => onSelect(e.id)}
-                        className={`flex-1 truncate px-4 py-1 text-left text-sm ${
-                          e.id === selectedId ? "bg-neutral-800 text-neutral-100" : "text-neutral-300 hover:bg-neutral-900"
-                        }`}
-                      >
-                        {e.name}
-                      </button>
-                      <button
-                        onClick={() => onDelete(e.id)}
-                        title="Delete"
-                        className="px-2 text-neutral-600 opacity-0 hover:text-red-400 group-hover/item:opacity-100"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+    <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-800">
+      <div className="border-b border-neutral-800 p-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search files…"
+          className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+        />
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+        {CATEGORY_ORDER.map((category) => {
+          const all = grouped.get(category) ?? [];
+          const items = q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
+          if (all.length === 0 && category === "config") return null;
+          if (q && items.length === 0 && adding !== category) return null;
+          const byGroup = new Map<string, ProjectEntry[]>();
+          for (const e of items) {
+            const g = e.group ?? "";
+            if (!byGroup.has(g)) byGroup.set(g, []);
+            byGroup.get(g)!.push(e);
+          }
+          return (
+            <div key={category} className="mb-1">
+              <div className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                  {CATEGORY_LABELS[category]} <span className="text-neutral-600">({all.length})</span>
+                </span>
+                {ADDABLE.includes(category) && (
+                  <button
+                    onClick={() => {
+                      setAdding(adding === category ? null : category);
+                      setName("");
+                    }}
+                    title={`Add ${CATEGORY_LABELS[category]}`}
+                    className="rounded px-1.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-amber-400"
+                  >
+                    +
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
-        );
-      })}
+              {adding === category && (
+                <div className="px-3 pb-1.5">
+                  <input
+                    autoFocus
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitAdd();
+                      if (e.key === "Escape") {
+                        setAdding(null);
+                        setName("");
+                      }
+                    }}
+                    onBlur={submitAdd}
+                    placeholder={`New ${CATEGORY_LABELS[category].toLowerCase().replace(/s$/, "")} name…`}
+                    className="w-full rounded border border-amber-500/60 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none"
+                  />
+                </div>
+              )}
+              {[...byGroup.entries()].map(([group, groupItems]) => (
+                <div key={group}>
+                  {group && <div className="px-4 py-0.5 text-[11px] text-neutral-600">{group}</div>}
+                  <ul>
+                    {groupItems.map((e) => (
+                      <li key={e.id} className="group/item flex items-center">
+                        <button
+                          onClick={() => onSelect(e.id)}
+                          className={`flex-1 truncate px-4 py-1 text-left text-sm ${
+                            e.id === selectedId
+                              ? "bg-neutral-800 text-neutral-100"
+                              : "text-neutral-300 hover:bg-neutral-900"
+                          }`}
+                        >
+                          {e.name}
+                        </button>
+                        <button
+                          onClick={() => onDelete(e.id)}
+                          title="Delete"
+                          className="px-2 text-neutral-600 opacity-0 hover:text-red-400 group-hover/item:opacity-100"
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </aside>
   );
 }
@@ -390,6 +527,7 @@ function Inspector({
   tint,
   onTint,
   onText,
+  revision,
 }: {
   entry: ProjectEntry;
   pack: ResourcePack | null;
@@ -397,6 +535,7 @@ function Inspector({
   definition: VehicleDefinition | null;
   parseError: string | null;
   tint: [number, number, number] | null;
+  revision: number;
   onTint: (t: [number, number, number] | null) => void;
   onText: (t: string) => void;
 }) {
@@ -472,7 +611,7 @@ function Inspector({
             className="flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 p-3 font-mono text-xs text-neutral-200 outline-none focus:border-neutral-600"
           />
         ) : (
-          <ConfigForm key={entry.id} text={entry.text} onChange={onText} />
+          <ConfigForm key={`${entry.id}:${revision}`} text={entry.text} onChange={onText} />
         )}
       </div>
     </aside>

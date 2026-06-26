@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Hjson from "hjson";
 import VehicleScene from "@/components/VehicleScene";
 import ResourcePackPicker from "@/components/ResourcePackPicker";
@@ -53,18 +53,20 @@ export default function EditorWorkspace() {
 
   const selected = entries.find((e) => e.id === selectedId) ?? null;
   const rims = useMemo(() => rimMap(entries), [entries]);
+  // Defer the (heavy) 3D rebuild so the form stays responsive while typing.
+  const deferred = useDeferredValue(selected);
 
   // Parse the selected vehicle for the 3D view, keeping the last good render through transient typos.
   const { definition, parseError } = useMemo(() => {
-    if (!selected || selected.category !== "vehicle") return { definition: null, parseError: null };
+    if (!deferred || deferred.category !== "vehicle") return { definition: null, parseError: null };
     try {
-      const def = vehicleDefinition(selected, rims);
+      const def = vehicleDefinition(deferred, rims);
       lastDef.current = def;
       return { definition: def, parseError: null };
     } catch (e) {
       return { definition: null, parseError: e instanceof Error ? e.message : String(e) };
     }
-  }, [selected, rims]);
+  }, [deferred, rims]);
 
   const nonVehicleError = useMemo(() => {
     if (!selected || selected.category === "vehicle" || selected.category === "config") return null;

@@ -1,9 +1,10 @@
 /**
  * Converts a resolved Minecraft model (elements + textures + head display transform) into a Three.js
- * object: one quad per defined element face, element rotations applied around their origin, and the
- * model's `display.head` transform on the whole thing. Robust by design — geometry renders even when
- * a texture can't be resolved (flat fallback colour), so a resolved model is never invisible, and
- * flat/`item/generated` models render as a textured sprite.
+ * object. Faces are baked (element rotations folded into the vertices) and **merged by material**, so
+ * a ~900-element vehicle becomes a handful of meshes (one per texture/tint) instead of thousands of
+ * draw calls. The model's `display.head` transform + the head-item 0.625 scale are applied on top.
+ * Robust by design — a face with no resolvable texture renders a flat fallback colour, and a
+ * flat/`item/generated` model renders as a textured sprite.
  */
 
 import * as THREE from "three";
@@ -11,8 +12,6 @@ import {
   resolveModel,
   resolveModelId,
   resolveTexture,
-  type McElement,
-  type McFace,
   type ResolvedModel,
   type ResourcePack,
 } from "./resourcepack";
@@ -25,6 +24,12 @@ const FALLBACK_HEX = "#9aa0a6";
 // display.head scale (~3.8) blows the body up to ~6 blocks while the wheel offsets stay ~±1.9, so the
 // wheels cluster in the body's middle instead of reaching the corners.
 const HEAD_ITEM_SCALE = 0.625;
+const AXES: Record<"x" | "y" | "z", THREE.Vector3> = {
+  x: new THREE.Vector3(1, 0, 0),
+  y: new THREE.Vector3(0, 1, 0),
+  z: new THREE.Vector3(0, 0, 1),
+};
+
 const textureCache = new Map<string, THREE.Texture>();
 
 type Face = "down" | "up" | "north" | "south" | "west" | "east";
@@ -86,66 +91,68 @@ function defaultUv(face: Face, from: number[], to: number[]): [number, number, n
   }
 }
 
-function buildFace(
-  face: Face,
-  from: number[],
-  to: number[],
-  mcFace: McFace,
-  model: ResolvedModel,
-  pack: ResourcePack,
-  tint?: THREE.Color,
-): THREE.Mesh {
-  const corners = faceCorners(face, from, to);
-  const [u1, v1, u2, v2] = (mcFace.uv ?? defaultUv(face, from, to)).map((n) => n / 16);
-  const uvs = [
-    [u1, 1 - v1],
-    [u2, 1 - v1],
-    [u2, 1 - v2],
-    [u1, 1 - v2],
-  ];
+const TRI = [0, 1, 2, 0, 2, 3]; // two triangles per quad
 
-  const positions = new Float32Array([
-    ...corners[0], ...corners[1], ...corners[2],
-    ...corners[0], ...corners[2], ...corners[3],
-  ]);
-  const uvArray = new Float32Array([...uvs[0], ...uvs[1], ...uvs[2], ...uvs[0], ...uvs[2], ...uvs[3]]);
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvArray, 2));
-  geometry.computeVertexNormals();
-
-  const faceTint = mcFace.tintindex != null && mcFace.tintindex >= 0 ? tint : undefined;
-  return new THREE.Mesh(geometry, faceMaterial(resolveTexture(pack, model.textures, mcFace.texture), faceTint));
+interface Bucket {
+  positions: number[];
+  uvs: number[];
+  material: THREE.Material;
 }
 
-function buildElement(
-  element: McElement,
-  model: ResolvedModel,
-  pack: ResourcePack,
-  tint?: THREE.Color,
-): THREE.Object3D {
-  const from = element.from.map((v) => v / 16);
-  const to = element.to.map((v) => v / 16);
+/** Bake every element face into per-material vertex buckets, folding element rotations into vertices. */
+function collectGeometry(model: ResolvedModel, pack: ResourcePack, tint?: THREE.Color): THREE.Group {
+  const buckets = new Map<string, Bucket>();
+  const v = new THREE.Vector3();
 
-  const group = new THREE.Group();
-  for (const face of FACES) {
-    const mcFace = element.faces?.[face];
-    if (mcFace) group.add(buildFace(face, from, to, mcFace, model, pack, tint));
+  for (const element of model.elements) {
+    const from = element.from.map((n) => n / 16);
+    const to = element.to.map((n) => n / 16);
+
+    let matrix: THREE.Matrix4 | null = null;
+    if (element.rotation) {
+      const o = element.rotation.origin.map((n) => n / 16);
+      matrix = new THREE.Matrix4()
+        .makeTranslation(o[0], o[1], o[2])
+        .multiply(new THREE.Matrix4().makeRotationAxis(AXES[element.rotation.axis], element.rotation.angle * DEG))
+        .multiply(new THREE.Matrix4().makeTranslation(-o[0], -o[1], -o[2]));
+    }
+
+    for (const face of FACES) {
+      const mcFace = element.faces?.[face];
+      if (!mcFace) continue;
+
+      const url = resolveTexture(pack, model.textures, mcFace.texture);
+      const faceTint = mcFace.tintindex != null && mcFace.tintindex >= 0 ? tint : undefined;
+      const key = `${url ?? "#fallback"}|${faceTint ? faceTint.getHexString() : ""}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { positions: [], uvs: [], material: faceMaterial(url, faceTint) };
+        buckets.set(key, bucket);
+      }
+
+      const corners = faceCorners(face, from, to).map((c) => {
+        v.set(c[0], c[1], c[2]);
+        if (matrix) v.applyMatrix4(matrix);
+        return [v.x, v.y, v.z];
+      });
+      const [u1, t1, u2, t2] = (mcFace.uv ?? defaultUv(face, from, to)).map((n) => n / 16);
+      const uvc = [[u1, 1 - t1], [u2, 1 - t1], [u2, 1 - t2], [u1, 1 - t2]];
+      for (const i of TRI) {
+        bucket.positions.push(corners[i][0], corners[i][1], corners[i][2]);
+        bucket.uvs.push(uvc[i][0], uvc[i][1]);
+      }
+    }
   }
 
-  if (!element.rotation) return group;
-
-  const origin = element.rotation.origin.map((v) => v / 16);
-  const pivot = new THREE.Group();
-  pivot.position.set(origin[0], origin[1], origin[2]);
-  group.position.set(-origin[0], -origin[1], -origin[2]);
-  pivot.add(group);
-  const rad = element.rotation.angle * DEG;
-  if (element.rotation.axis === "x") pivot.rotation.x = rad;
-  else if (element.rotation.axis === "y") pivot.rotation.y = rad;
-  else pivot.rotation.z = rad;
-  return pivot;
+  const group = new THREE.Group();
+  for (const bucket of buckets.values()) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(bucket.positions, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(bucket.uvs, 2));
+    geometry.computeVertexNormals();
+    group.add(new THREE.Mesh(geometry, bucket.material));
+  }
+  return group;
 }
 
 /** A flat (item/generated) model — render its first texture as a centred sprite. */
@@ -159,20 +166,18 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
 }
 
 export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?: THREE.Color): THREE.Object3D {
-  const root = new THREE.Group();
+  let root: THREE.Group;
   if (model.elements.length === 0) {
+    root = new THREE.Group();
     const flat = buildFlatModel(model, pack);
     if (flat) root.add(flat);
   } else {
-    for (const element of model.elements) {
-      root.add(buildElement(element, model, pack, tint));
-    }
+    root = collectGeometry(model, pack, tint);
   }
+
   // Minecraft renders a head item as `display.head` applied to the centred model:
   //   final = translation + R · S · (p − 0.5)     (ItemRenderer: transform.apply(); translate(−0.5))
-  // i.e. the model is centred on the block origin, then scaled/rotated/translated. There is NO extra
-  // re-centre afterwards — adding one shifts each part by ½ block, which (rotated by a wheel's yaw)
-  // splits a wheel pair left/right.
+  // No extra re-centre afterwards (that would split wheel pairs left/right once rotated by yaw).
   root.position.set(-0.5, -0.5, -0.5);
 
   const transform = new THREE.Group();

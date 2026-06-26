@@ -25,12 +25,16 @@ export interface PartDef {
   colorable?: boolean;
   /** Default tint colour (RGB 0-255) applied to the model's tintindex faces (V3 leather colour). */
   color?: [number, number, number];
+  /** Index of this part in the source V3 `parts` array — lets 3D edits write back to the right one. */
+  sourceIndex?: number;
 }
 
 export interface SeatDef {
   id: string;
   offset: Vec3;
   driver?: boolean;
+  /** Index of this seat in the source V3 `parts` array (seats live in `parts` in V3). */
+  sourceIndex?: number;
 }
 
 export interface VehiclePhysics {

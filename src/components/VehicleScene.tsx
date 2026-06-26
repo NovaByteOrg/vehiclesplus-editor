@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import type { VehicleDefinition } from "@/lib/vehicle";
 import type { ResourcePack } from "@/lib/resourcepack";
+import type { Selection } from "./VehicleViewer";
 
 // The 3D canvas is client-only (WebGL); never server-render it.
 const VehicleViewer = dynamic(() => import("./VehicleViewer"), {
@@ -19,15 +20,29 @@ export default function VehicleScene({
   pack,
   tint,
   viewport,
+  selection,
+  onSelect,
+  onMove,
 }: {
   definition: VehicleDefinition;
   pack?: ResourcePack | null;
   tint?: [number, number, number] | null;
   viewport?: { bg: string; grid: string; grid2: string };
+  selection?: Selection;
+  onSelect?: (sel: Selection) => void;
+  onMove?: (kind: "part" | "seat", index: number, offset: [number, number, number]) => void;
 }) {
   return (
     <div className="absolute inset-0">
-      <VehicleViewer definition={definition} pack={pack} tint={tint} viewport={viewport} />
+      <VehicleViewer
+        definition={definition}
+        pack={pack}
+        tint={tint}
+        viewport={viewport}
+        selection={selection}
+        onSelect={onSelect}
+        onMove={onMove}
+      />
     </div>
   );
 }

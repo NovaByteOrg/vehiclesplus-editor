@@ -66,7 +66,7 @@ const SEAT_TYPES = new Set(["seat", "bikeseat", "turretseat", "controllable"]);
  * Armor-stand HEAD-slot item → ItemDisplay calibration. V3 head items render ~1.44 blocks above the
  * stand at ~0.625 scale. Best-effort defaults — fine-tune visually in the editor after import.
  */
-const HEAD_Y_OFFSET = 1.44;
+export const HEAD_Y_OFFSET = 1.44;
 const HEAD_SCALE = 0.625;
 
 /** ~20 ticks/s × 3.6 → one block/tick ≈ 72 km/h, used to bring V3's km/h max speed into V4 units. */
@@ -108,6 +108,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
         id: `seat_${seats.length + 1}`,
         offset: [x, y, z],
         driver: part.steer === true,
+        sourceIndex: index,
       });
       return;
     }
@@ -124,6 +125,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
           baseMaterial: rim.material,
           customModelData: rim.customModelData,
           colorable: false,
+          sourceIndex: index,
         });
       } else {
         // No rim model resolved — a placeholder at the same HEAD height as real parts.
@@ -134,6 +136,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
           scale: [0.25, 0.6, 0.6],
           baseMaterial: "COAL_BLOCK",
           colorable: false,
+          sourceIndex: index,
         });
       }
       return;
@@ -152,6 +155,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
         customModelData: part.item.custommodeldata,
         colorable: part.item.color != null,
         color: colorTriple(part.item.color),
+        sourceIndex: index,
       });
     }
   });

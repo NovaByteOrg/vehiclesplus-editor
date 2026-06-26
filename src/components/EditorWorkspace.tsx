@@ -19,7 +19,9 @@ import { fetchResourcePackFile } from "@/lib/migration";
 import { generateV4PackForAll } from "@/lib/generate-pack";
 import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 import type { VehicleDefinition } from "@/lib/vehicle";
+import { HEAD_Y_OFFSET } from "@/lib/v3";
 import { DEFAULT_THEME, THEMES, themeViewport } from "@/lib/themes";
+import type { Selection } from "@/components/VehicleViewer";
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -33,6 +35,15 @@ function saveBlob(blob: Blob, filename: string) {
 const CATEGORY_ORDER: Category[] = ["vehicle", "rim", "fuel", "vehicleType", "config"];
 const ADDABLE: Category[] = ["vehicle", "rim", "fuel", "vehicleType"];
 
+function selLabel(def: VehicleDefinition | null, sel: Selection): string {
+  if (!def || !sel) return "";
+  if (sel.kind === "seat") {
+    const s = def.seats?.find((x) => x.sourceIndex === sel.index);
+    return s ? (s.driver ? "driver seat" : s.id) : "seat";
+  }
+  return def.parts.find((x) => x.sourceIndex === sel.index)?.id ?? "part";
+}
+
 export default function EditorWorkspace() {
   const [entries, setEntries] = useState<ProjectEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -45,6 +56,7 @@ export default function EditorWorkspace() {
   const [hist, setHist] = useState<{ past: ProjectEntry[][]; future: ProjectEntry[][] }>({ past: [], future: [] });
   const [dirty, setDirty] = useState(false);
   const [revision, setRevision] = useState(0); // bumped on undo/redo to remount the form from reverted data
+  const [selection, setSelection] = useState<Selection>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
   const lastEditKey = useRef("");
@@ -64,6 +76,28 @@ export default function EditorWorkspace() {
   }
 
   useEffect(() => setTint(null), [selectedId]);
+  useEffect(() => setSelection(null), [selectedId]);
+
+  // A part/seat was dragged in the 3D view — reverse the converter and write the offset back to V3.
+  function onMovePart(kind: "part" | "seat", index: number, offset: [number, number, number]) {
+    if (!selected || selected.category !== "vehicle" || index < 0) return;
+    let obj: { parts?: Record<string, number>[] };
+    try {
+      obj = Hjson.parse(selected.text) as { parts?: Record<string, number>[] };
+    } catch {
+      return;
+    }
+    const part = obj.parts?.[index];
+    if (!part) return;
+    const head = kind === "seat" ? 0 : HEAD_Y_OFFSET;
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    part.xoffset = r(-offset[2]); // reverse (x,z)->(-z,-x) and the head-bone y offset
+    part.yoffset = r(offset[1] - head);
+    part.zoffset = r(-offset[0]);
+    const text = Hjson.stringify(obj, { bracesSameLine: false, separator: false });
+    commit(entries.map((e) => (e.id === selectedId ? { ...e, text } : e)));
+    setRevision((v) => v + 1);
+  }
 
   // ---- history (undo/redo) + dirty tracking ----
   // Text edits coalesce into one undo step per burst (per entry, 700ms); structural changes snapshot.
@@ -363,7 +397,19 @@ export default function EditorWorkspace() {
                   pack={pack}
                   tint={tint}
                   viewport={themeViewport(theme)}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onMove={onMovePart}
                 />
+                {selection ? (
+                  <div className="pointer-events-none absolute left-3 top-3 rounded bg-neutral-800/80 px-2 py-1 text-xs text-neutral-100">
+                    {selLabel(definition ?? lastDef.current, selection)} · drag the arrows to move
+                  </div>
+                ) : (
+                  <p className="pointer-events-none absolute left-3 top-3 text-xs text-neutral-600">
+                    click a part or seat to move it
+                  </p>
+                )}
                 <p className="pointer-events-none absolute bottom-3 left-3 text-xs text-neutral-600">
                   drag to orbit · scroll to zoom
                 </p>

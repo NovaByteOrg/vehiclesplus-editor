@@ -24,3 +24,38 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/*
+ * Editor themes. The whole UI is built on the `neutral` ramp (surfaces/text) + `amber` (accent);
+ * Tailwind v4 compiles those utilities to var(--color-…), so re-skinning is just overriding the
+ * ramp per [data-theme] — no component changes. Light themes invert the neutral ramp so the same
+ * classes (bg-neutral-950 = app bg, text-neutral-100 = text) keep working.
+ */
+[data-theme="graphite"] {
+  --color-neutral-950: #16171a; --color-neutral-900: #1e1f23; --color-neutral-800: #2a2c31;
+  --color-neutral-700: #393b42; --color-neutral-600: #565860; --color-neutral-500: #83858e;
+  --color-neutral-400: #a4a6ae; --color-neutral-300: #c3c5cc; --color-neutral-200: #dbdce1;
+  --color-neutral-100: #e9eaee; --color-neutral-50: #f4f5f7;
+  --color-amber-500: #5f86cc; --color-amber-400: #7ba0db;
+}
+[data-theme="amber"] {
+  --color-neutral-950: #17140f; --color-neutral-900: #201b14; --color-neutral-800: #2c261c;
+  --color-neutral-700: #3b3326; --color-neutral-600: #574c39; --color-neutral-500: #8a7c64;
+  --color-neutral-400: #ab9d83; --color-neutral-300: #c9bda7; --color-neutral-200: #ddd3c3;
+  --color-neutral-100: #ece5d9; --color-neutral-50: #f6f1e9;
+  --color-amber-500: #f0a830; --color-amber-400: #f4b955;
+}
+[data-theme="light"] {
+  --color-neutral-950: #fbfbfa; --color-neutral-900: #ffffff; --color-neutral-800: #eeeef1;
+  --color-neutral-700: #e2e2e6; --color-neutral-600: #c8c8ce; --color-neutral-500: #9a9aa2;
+  --color-neutral-400: #6b6b75; --color-neutral-300: #4a4a52; --color-neutral-200: #2c2c34;
+  --color-neutral-100: #1c1c22; --color-neutral-50: #0e0e12;
+  --color-amber-500: #5a51e0; --color-amber-400: #6c63e6;
+}
+[data-theme="cockpit"] {
+  --color-neutral-950: #0b0c0f; --color-neutral-900: #111318; --color-neutral-800: #1a1d22;
+  --color-neutral-700: #262a30; --color-neutral-600: #3a3f47; --color-neutral-500: #6a727a;
+  --color-neutral-400: #8b939a; --color-neutral-300: #aeb5bb; --color-neutral-200: #ccd2d6;
+  --color-neutral-100: #dfe3e6; --color-neutral-50: #eef2f4;
+  --color-amber-500: #25d6c0; --color-amber-400: #44e0cc;
+}

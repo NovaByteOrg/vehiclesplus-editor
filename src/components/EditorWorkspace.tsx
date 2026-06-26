@@ -19,6 +19,7 @@ import { fetchResourcePackFile } from "@/lib/migration";
 import { generateV4PackForAll } from "@/lib/generate-pack";
 import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 import type { VehicleDefinition } from "@/lib/vehicle";
+import { DEFAULT_THEME, THEMES, themeViewport } from "@/lib/themes";
 
 function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -40,6 +41,7 @@ export default function EditorWorkspace() {
   const [tint, setTint] = useState<[number, number, number] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [theme, setTheme] = useState(DEFAULT_THEME);
   const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
 
@@ -47,7 +49,14 @@ export default function EditorWorkspace() {
     if (folderInput.current) {
       (folderInput.current as HTMLInputElement & { webkitdirectory?: boolean }).webkitdirectory = true;
     }
+    const saved = localStorage.getItem("vp-theme");
+    if (saved) setTheme(saved);
   }, []);
+
+  function changeTheme(id: string) {
+    setTheme(id);
+    localStorage.setItem("vp-theme", id);
+  }
 
   useEffect(() => setTint(null), [selectedId]);
 
@@ -183,7 +192,7 @@ export default function EditorWorkspace() {
   }, [entries]);
 
   return (
-    <main className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
+    <main data-theme={theme} className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
       <header className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-4 py-2.5">
         <span className="text-lg font-semibold">
           VehiclesPlus <span className="text-amber-400">Editor</span>
@@ -227,6 +236,20 @@ export default function EditorWorkspace() {
           >
             Export folder
           </button>
+          <span className="mx-1 h-4 w-px bg-neutral-700" />
+          <select
+            value={theme}
+            onChange={(e) => changeTheme(e.target.value)}
+            aria-label="Theme"
+            title="Theme"
+            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-300 outline-none hover:border-neutral-600"
+          >
+            {THEMES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
         </div>
       </header>
 
@@ -250,6 +273,7 @@ export default function EditorWorkspace() {
                   definition={definition ?? lastDef.current ?? { id: "x", name: "", type: "", schemaVersion: 1, parts: [] }}
                   pack={pack}
                   tint={tint}
+                  viewport={themeViewport(theme)}
                 />
                 <p className="pointer-events-none absolute bottom-3 left-3 text-xs text-neutral-600">
                   drag to orbit · scroll to zoom

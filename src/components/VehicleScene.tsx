@@ -18,14 +18,16 @@ export default function VehicleScene({
   definition,
   pack,
   tint,
+  viewport,
 }: {
   definition: VehicleDefinition;
   pack?: ResourcePack | null;
   tint?: [number, number, number] | null;
+  viewport?: { bg: string; grid: string; grid2: string };
 }) {
   return (
     <div className="absolute inset-0">
-      <VehicleViewer definition={definition} pack={pack} tint={tint} />
+      <VehicleViewer definition={definition} pack={pack} tint={tint} viewport={viewport} />
     </div>
   );
 }

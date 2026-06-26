@@ -71,14 +71,17 @@ export default function VehicleViewer({
   definition,
   pack,
   tint,
+  viewport,
 }: {
   definition: VehicleDefinition;
   pack?: ResourcePack | null;
   tint?: Tint;
+  viewport?: { bg: string; grid: string; grid2: string };
 }) {
+  const vp = viewport ?? { bg: "#0a0a0a", grid: "#333333", grid2: "#555555" };
   return (
     <Canvas shadows camera={{ position: [4.5, 2.2, 4.5], fov: 50 }}>
-      <color attach="background" args={["#0a0a0a"]} />
+      <color attach="background" args={[vp.bg]} />
       <ambientLight intensity={0.75} />
       <directionalLight position={[6, 10, 6]} intensity={1.1} castShadow />
       {/* Auto-frame whatever is loaded so it's never off-screen; refit when the vehicle changes. */}
@@ -88,8 +91,8 @@ export default function VehicleViewer({
       <Grid
         args={[24, 24]}
         position={[0, 0, 0]}
-        cellColor="#333333"
-        sectionColor="#555555"
+        cellColor={vp.grid}
+        sectionColor={vp.grid2}
         fadeDistance={30}
         infiniteGrid
       />

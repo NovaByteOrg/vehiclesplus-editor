@@ -97,9 +97,10 @@ function Marker({
   const r = node.isSeat ? 0.13 : 0.1;
   const active = selected || hovered;
   return (
-    <group position={node.pos}>
+    // The gizmo binds to the *group* (not the mesh): the group's `position` prop is re-applied by React
+    // each render, so after a drag it snaps back to the committed offset instead of keeping drag drift.
+    <group position={node.pos} ref={selected ? bindRef : undefined}>
       <mesh
-        ref={selected ? bindRef : undefined}
         scale={selected ? 1.5 : hovered ? 1.25 : 1}
         onClick={(e) => {
           e.stopPropagation();
@@ -147,6 +148,14 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
   const dragStart = useRef<THREE.Vector3 | null>(null);
 
   // Build each part's model once, and the visual-centre of that model in the part's local frame.
+  // A part's model only depends on these (NOT its offset/rotation/scale, which are applied as the group
+  // transform). Keyed on this so editing an offset — or any non-geometry field like price/name — reuses
+  // the existing models instead of rebuilding (and leaking) the whole car's geometry on every keystroke.
+  const geomSig = definition.parts
+    .map((p) => `${p.id}|${p.itemModel ?? ""}|${p.baseMaterial ?? ""}|${p.customModelData ?? ""}|${p.colorable ? 1 : 0}|${p.color?.join(",") ?? ""}`)
+    .join(";");
+  const tintSig = tint ? tint.join(",") : "";
+
   const built = useMemo(
     () =>
       definition.parts.map((part) => {
@@ -158,7 +167,8 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
         }
         return { model, center };
       }),
-    [definition.parts, pack, tint],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rebuild only on geometry-affecting inputs
+    [geomSig, tintSig, pack],
   );
 
   // Markers sit at each element's visual centre: parts at offset + R·(model centre), seats at their offset.
@@ -168,7 +178,8 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
     definition.parts.forEach((part, i) => {
       const rot = part.rotation ?? [0, 0, 0];
       const euler = new THREE.Euler(rot[0] * DEG, rot[1] * DEG, rot[2] * DEG);
-      const p = built[i].center.clone().applyEuler(euler).add(new THREE.Vector3(...part.offset));
+      const center = built[i]?.center ?? new THREE.Vector3();
+      const p = center.clone().applyEuler(euler).add(new THREE.Vector3(...part.offset));
       const info = infos.get(`part:${part.sourceIndex}`);
       if (info) list.push({ sel: { kind: "part", index: part.sourceIndex ?? -1 }, info, pos: [p.x, p.y, p.z], isSeat: false });
     });
@@ -212,7 +223,7 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
           <Part
             key={part.id}
             part={part}
-            model={built[i].model}
+            model={built[i]?.model ?? null}
             tint={tint}
             onSelect={() => onSelect?.({ kind: "part", index: part.sourceIndex ?? -1 })}
           />

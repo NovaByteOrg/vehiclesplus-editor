@@ -19,6 +19,7 @@ import { fetchResourcePackFile } from "@/lib/migration";
 import { generateV4PackForAll } from "@/lib/generate-pack";
 import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 import type { VehicleDefinition } from "@/lib/vehicle";
+import { describeElements } from "@/lib/elements";
 import { HEAD_Y_OFFSET } from "@/lib/v3";
 import { DEFAULT_THEME, THEMES, themeViewport } from "@/lib/themes";
 import { validateProject } from "@/lib/validate";
@@ -38,11 +39,52 @@ const ADDABLE: Category[] = ["vehicle", "rim", "fuel", "vehicleType"];
 
 function selLabel(def: VehicleDefinition | null, sel: Selection): string {
   if (!def || !sel) return "";
-  if (sel.kind === "seat") {
-    const s = def.seats?.find((x) => x.sourceIndex === sel.index);
-    return s ? (s.driver ? "driver seat" : s.id) : "seat";
-  }
-  return def.parts.find((x) => x.sourceIndex === sel.index)?.id ?? "part";
+  return describeElements(def).find((e) => e.selKind === sel.kind && e.index === sel.index)?.label ?? sel.kind;
+}
+
+/** The floating, colour-coded list of a vehicle's parts + seats — click to select, matches the 3D markers. */
+function ElementList({
+  def,
+  selection,
+  onSelect,
+  onHover,
+}: {
+  def: VehicleDefinition;
+  selection: Selection;
+  onSelect: (sel: Selection) => void;
+  onHover: (sel: Selection) => void;
+}) {
+  const elements = describeElements(def);
+  if (!elements.length) return null;
+  return (
+    <div
+      className="absolute right-3 top-3 flex max-h-[78%] w-44 flex-col rounded-lg border border-neutral-700 bg-neutral-900/85 backdrop-blur"
+      onMouseLeave={() => onHover(null)}
+    >
+      <div className="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+        Parts &amp; seats
+      </div>
+      <div className="overflow-y-auto px-1 pb-1">
+        {elements.map((el) => {
+          const sel = selection?.kind === el.selKind && selection.index === el.index;
+          return (
+            <button
+              key={`${el.selKind}:${el.index}`}
+              onClick={() => onSelect(sel ? null : { kind: el.selKind, index: el.index })}
+              onMouseEnter={() => onHover({ kind: el.selKind, index: el.index })}
+              className={`flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs ${
+                sel ? "bg-neutral-700 text-white" : "text-neutral-300 hover:bg-neutral-800"
+              }`}
+            >
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: el.color }} />
+              <span className="shrink-0 text-[13px] leading-none">{el.emoji}</span>
+              <span className="truncate">{el.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export default function EditorWorkspace() {
@@ -58,6 +100,7 @@ export default function EditorWorkspace() {
   const [dirty, setDirty] = useState(false);
   const [revision, setRevision] = useState(0); // bumped on undo/redo to remount the form from reverted data
   const [selection, setSelection] = useState<Selection>(null);
+  const [hovered, setHovered] = useState<Selection>(null);
   const [showProblems, setShowProblems] = useState(false);
   const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
@@ -78,7 +121,10 @@ export default function EditorWorkspace() {
   }
 
   useEffect(() => setTint(null), [selectedId]);
-  useEffect(() => setSelection(null), [selectedId]);
+  useEffect(() => {
+    setSelection(null);
+    setHovered(null);
+  }, [selectedId]);
 
   // A part/seat was dragged in the 3D view — reverse the converter and write the offset back to V3.
   function onMovePart(kind: "part" | "seat", index: number, offset: [number, number, number]) {
@@ -402,6 +448,7 @@ export default function EditorWorkspace() {
                   tint={tint}
                   viewport={themeViewport(theme)}
                   selection={selection}
+                  hovered={hovered}
                   onSelect={setSelection}
                   onMove={onMovePart}
                 />
@@ -411,9 +458,15 @@ export default function EditorWorkspace() {
                   </div>
                 ) : (
                   <p className="pointer-events-none absolute left-3 top-3 text-xs text-neutral-600">
-                    click a part or seat to move it
+                    click a marker, model, or list item to select
                   </p>
                 )}
+                <ElementList
+                  def={definition ?? lastDef.current ?? { id: "x", name: "", type: "", schemaVersion: 1, parts: [] }}
+                  selection={selection}
+                  onSelect={setSelection}
+                  onHover={setHovered}
+                />
                 <p className="pointer-events-none absolute bottom-3 left-3 text-xs text-neutral-600">
                   drag to orbit · scroll to zoom
                 </p>

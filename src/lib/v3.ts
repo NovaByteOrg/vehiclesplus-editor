@@ -119,6 +119,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
       if (rim?.material) {
         parts.push({
           id: `wheel_${index}`,
+          kind: "wheel",
           offset: [x, y + HEAD_Y_OFFSET, z],
           rotation: [0, rotation, 0],
           scale: [HEAD_SCALE, HEAD_SCALE, HEAD_SCALE],
@@ -131,6 +132,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
         // No rim model resolved — a placeholder at the same HEAD height as real parts.
         parts.push({
           id: `wheel_${index}`,
+          kind: "wheel",
           offset: [x, y + HEAD_Y_OFFSET, z],
           rotation: [0, rotation, 0],
           scale: [0.25, 0.6, 0.6],
@@ -148,6 +150,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
       const scale: Vec3 = onHead ? [HEAD_SCALE, HEAD_SCALE, HEAD_SCALE] : [1, 1, 1];
       parts.push({
         id: `${type || "part"}_${index}`,
+        kind: type || "part",
         offset,
         rotation: [0, rotation, 0],
         scale,

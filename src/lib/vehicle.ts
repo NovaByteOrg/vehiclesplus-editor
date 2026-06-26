@@ -10,6 +10,8 @@ export type Vec3 = [number, number, number];
 
 export interface PartDef {
   id: string;
+  /** Source V3 part type ("skin" | "wheel" | "rotor" | "turret" | …) — drives the editor's marker colour/label. */
+  kind?: string;
   /** Local offset from the vehicle root, in blocks: [x, y, z]. */
   offset: Vec3;
   /** Local rotation as [pitch, yaw, roll] in degrees. */

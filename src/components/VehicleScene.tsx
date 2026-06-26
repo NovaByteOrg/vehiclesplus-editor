@@ -21,6 +21,7 @@ export default function VehicleScene({
   tint,
   viewport,
   selection,
+  hovered,
   onSelect,
   onMove,
 }: {
@@ -29,6 +30,7 @@ export default function VehicleScene({
   tint?: [number, number, number] | null;
   viewport?: { bg: string; grid: string; grid2: string };
   selection?: Selection;
+  hovered?: Selection;
   onSelect?: (sel: Selection) => void;
   onMove?: (kind: "part" | "seat", index: number, offset: [number, number, number]) => void;
 }) {
@@ -40,6 +42,7 @@ export default function VehicleScene({
         tint={tint}
         viewport={viewport}
         selection={selection}
+        hovered={hovered}
         onSelect={onSelect}
         onMove={onMove}
       />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, Grid, Html, OrbitControls, TransformControls } from "@react-three/drei";
@@ -40,11 +40,14 @@ function Part({
   model,
   tint,
   onSelect,
+  bindModelRef,
 }: {
   part: PartDef;
   model: THREE.Object3D | null;
   tint?: Tint;
   onSelect: () => void;
+  // Ref to this part's group, set only while it's selected — lets the gizmo move the model live during a drag.
+  bindModelRef?: (o: THREE.Object3D | null) => void;
 }) {
   const [x, y, z] = part.offset;
   const [pitch, yaw, roll] = part.rotation ?? [0, 0, 0];
@@ -59,7 +62,7 @@ function Part({
 
   if (model) {
     return (
-      <group {...common}>
+      <group {...common} ref={bindModelRef}>
         <primitive object={model} />
       </group>
     );
@@ -70,7 +73,7 @@ function Part({
   const paint = part.colorable ? (tint ?? part.color) : undefined;
   const color = paint ? `rgb(${paint[0]},${paint[1]},${paint[2]})` : mat.color;
   return (
-    <mesh {...common} scale={[sx, sy, sz]} castShadow>
+    <mesh {...common} ref={bindModelRef} scale={[sx, sy, sz]} castShadow>
       <boxGeometry args={[1, 1, 1]} />
       <meshStandardMaterial color={color} transparent={mat.opacity != null} opacity={mat.opacity ?? 1} metalness={0.2} roughness={0.7} />
     </mesh>
@@ -146,6 +149,12 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
   const [gizmo, setGizmo] = useState<THREE.Object3D | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const dragStart = useRef<THREE.Vector3 | null>(null);
+  // The selected part's model group + its offset at drag start — so the model tracks the gizmo live.
+  const selectedModelRef = useRef<THREE.Object3D | null>(null);
+  const baseOffset = useRef<[number, number, number] | null>(null);
+  const bindSelectedModel = useCallback((o: THREE.Object3D | null) => {
+    selectedModelRef.current = o;
+  }, []);
 
   // Build each part's model once, and the visual-centre of that model in the part's local frame.
   // A part's model only depends on these (NOT its offset/rotation/scale, which are applied as the group
@@ -206,28 +215,47 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
     return definition.parts.find((p) => p.sourceIndex === selection.index)?.offset ?? null;
   };
 
+  function startDrag() {
+    if (!gizmo) return;
+    dragStart.current = gizmo.position.clone();
+    baseOffset.current = selectedOffset();
+  }
+
+  // Fires continuously while dragging: move the selected part's model with the gizmo so it tracks live
+  // (the config is only written on release). Seats have no model bound here, so only their marker moves.
+  function trackDrag() {
+    if (!dragStart.current || !baseOffset.current || !selectedModelRef.current) return;
+    const d = gizmo!.position.clone().sub(dragStart.current);
+    selectedModelRef.current.position.set(baseOffset.current[0] + d.x, baseOffset.current[1] + d.y, baseOffset.current[2] + d.z);
+  }
+
   function commitMove() {
     if (!gizmo || !selection || !dragStart.current) return;
-    const cur = selectedOffset();
+    const cur = baseOffset.current ?? selectedOffset();
     if (cur) {
       const d = gizmo.position.clone().sub(dragStart.current);
       onMove?.(selection.kind, selection.index, [cur[0] + d.x, cur[1] + d.y, cur[2] + d.z]);
     }
     dragStart.current = null;
+    baseOffset.current = null;
   }
 
   return (
     <group ref={wrapRef}>
       <group ref={partsRef}>
-        {definition.parts.map((part, i) => (
-          <Part
-            key={part.id}
-            part={part}
-            model={built[i]?.model ?? null}
-            tint={tint}
-            onSelect={() => onSelect?.({ kind: "part", index: part.sourceIndex ?? -1 })}
-          />
-        ))}
+        {definition.parts.map((part, i) => {
+          const isSel = selection?.kind === "part" && selection.index === part.sourceIndex;
+          return (
+            <Part
+              key={part.id}
+              part={part}
+              model={built[i]?.model ?? null}
+              tint={tint}
+              onSelect={() => onSelect?.({ kind: "part", index: part.sourceIndex ?? -1 })}
+              bindModelRef={isSel ? bindSelectedModel : undefined}
+            />
+          );
+        })}
       </group>
       {nodes.map((node) => {
         const key = `${node.sel.kind}:${node.sel.index}`;
@@ -249,7 +277,8 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
           object={gizmo}
           mode="translate"
           size={0.7}
-          onMouseDown={() => (dragStart.current = gizmo.position.clone())}
+          onMouseDown={startDrag}
+          onObjectChange={trackDrag}
           onMouseUp={commitMove}
         />
       )}

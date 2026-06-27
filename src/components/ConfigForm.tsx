@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Hjson from "hjson";
 import { COMMON_MATERIALS, ENUM_FOR_KEY, PLUGIN_ENUMS } from "@/lib/plugin-enums";
+import { describeRawParts } from "@/lib/elements";
 
 const MATERIALS_LIST_ID = "vp-materials-list";
 
@@ -10,6 +11,9 @@ const MATERIALS_LIST_ID = "vp-materials-list";
  * A structured, form-based editor for a VehiclesPlus config. Parses the HJSON once and renders nice
  * typed fields (text / number / toggle / colour picker / lists / nested sections) for every key —
  * including ones we don't specially know about — then serialises back to HJSON on every change.
+ *
+ * Layout: top-level primitives go in a "General" card; each nested object/array becomes a collapsible
+ * section; and `parts[]` items render as colour-coded, collapsible cards that match the 3D markers.
  */
 
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json };
@@ -37,18 +41,18 @@ function labelize(key: string): string {
 }
 
 const inputCls =
-  "rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-amber-500";
+  "rounded-md border border-neutral-700 bg-neutral-950/60 px-2 py-1 text-xs text-neutral-200 outline-none transition focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30";
 
 function TextField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return <input className={`${inputCls} w-full`} value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false} />;
 }
 
-function NumberField({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+function NumberField({ value, onChange, className = "w-28" }: { value: number; onChange: (v: number) => void; className?: string }) {
   // Local string state so intermediate edits like "1." or "-" aren't clobbered by re-serialisation.
   const [local, setLocal] = useState(String(value));
   return (
     <input
-      className={`${inputCls} w-28`}
+      className={`${inputCls} ${className}`}
       value={local}
       inputMode="decimal"
       onChange={(e) => {
@@ -64,7 +68,7 @@ function BoolField({ value, onChange }: { value: boolean; onChange: (v: boolean)
   return (
     <button
       onClick={() => onChange(!value)}
-      className={`h-5 w-9 rounded-full px-0.5 transition ${value ? "bg-amber-500" : "bg-neutral-700"}`}
+      className={`h-5 w-9 shrink-0 rounded-full px-0.5 transition ${value ? "bg-amber-500" : "bg-neutral-700"}`}
     >
       <span className={`block h-4 w-4 rounded-full bg-white transition ${value ? "translate-x-4" : ""}`} />
     </button>
@@ -131,31 +135,51 @@ function isInline(v: Json): boolean {
   return isColor(v) || !(Array.isArray(v) || isPlainObject(v));
 }
 
-function ObjectField({ value, onChange, top }: { value: Record<string, Json>; onChange: (v: Json) => void; top?: boolean }) {
+const OFFSET_KEYS = ["xoffset", "yoffset", "zoffset"] as const;
+
+/** Label + control on one row. */
+function InlineRow({ label, value, onChange, fieldKey }: { label: string; value: Json; onChange: (v: Json) => void; fieldKey: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <label className="shrink-0 text-xs text-neutral-400">{label}</label>
+      <Field value={value} onChange={onChange} fieldKey={fieldKey} />
+    </div>
+  );
+}
+
+function ObjectField({ value, onChange }: { value: Record<string, Json>; onChange: (v: Json) => void }) {
   const keys = Object.keys(value);
-  const body = (
+  const hasOffset = OFFSET_KEYS.every((k) => typeof value[k] === "number");
+  const rest = hasOffset ? keys.filter((k) => !OFFSET_KEYS.includes(k as (typeof OFFSET_KEYS)[number])) : keys;
+  const set = (key: string) => (nv: Json) => onChange({ ...value, [key]: nv });
+
+  return (
     <div className="space-y-2">
-      {keys.map((key) => {
+      {hasOffset && (
+        <div className="flex items-center justify-between gap-3">
+          <label className="shrink-0 text-xs text-neutral-400">Offset</label>
+          <div className="flex gap-1">
+            {OFFSET_KEYS.map((k, i) => (
+              <div key={k} className="flex items-center gap-1">
+                <span className="text-[10px] uppercase text-neutral-600">{"xyz"[i]}</span>
+                <NumberField value={value[k] as number} onChange={set(k)} className="w-16" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {rest.map((key) => {
         const v = value[key];
-        const set = (nv: Json) => onChange({ ...value, [key]: nv });
-        if (isInline(v)) {
-          return (
-            <div key={key} className="flex items-center justify-between gap-3">
-              <label className="shrink-0 text-xs text-neutral-400">{labelize(key)}</label>
-              <Field value={v} onChange={set} fieldKey={key} />
-            </div>
-          );
-        }
+        if (isInline(v)) return <InlineRow key={key} label={labelize(key)} value={v} onChange={set(key)} fieldKey={key} />;
         return (
-          <div key={key} className="rounded border border-neutral-800 bg-neutral-900/40 p-2">
+          <div key={key} className="rounded-md border border-neutral-800 bg-neutral-900/30 p-2">
             <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-neutral-500">{labelize(key)}</div>
-            <Field value={v} onChange={set} fieldKey={key} />
+            <Field value={v} onChange={set(key)} fieldKey={key} />
           </div>
         );
       })}
     </div>
   );
-  return top ? body : <div className="pl-1">{body}</div>;
 }
 
 function templateFrom(items: Json[]): Json {
@@ -169,35 +193,128 @@ function templateFrom(items: Json[]): Json {
   return "";
 }
 
+/** A collapsible card for one object inside an array (e.g. a part / seat), with a coloured title. */
+function ItemCard({
+  title,
+  color,
+  emoji,
+  value,
+  onChange,
+  onRemove,
+  defaultOpen = false,
+}: {
+  title: string;
+  color: string;
+  emoji?: string;
+  value: Record<string, Json>;
+  onChange: (v: Json) => void;
+  onRemove: () => void;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/40">
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <button onClick={() => setOpen((o) => !o)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} />
+          {emoji && <span className="shrink-0 text-[13px] leading-none">{emoji}</span>}
+          <span className="truncate text-xs font-medium text-neutral-200">{title}</span>
+          <span className="ml-auto text-neutral-600">{open ? "▾" : "▸"}</span>
+        </button>
+        <button onClick={onRemove} title="Remove" className="rounded px-1 text-neutral-600 hover:bg-neutral-800 hover:text-red-400">
+          ×
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-neutral-800 px-2 py-2">
+          <ObjectField value={value} onChange={onChange} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ArrayField({ value, onChange, fieldKey }: { value: Json[]; onChange: (v: Json) => void; fieldKey?: string }) {
   const enumKey = fieldKey ? ENUM_FOR_KEY[fieldKey] : undefined;
   const addItem = () => onChange([...value, enumKey ? PLUGIN_ENUMS[enumKey][0] : value.length ? templateFrom(value) : ""]);
+  const replace = (i: number) => (nv: Json) => onChange(value.map((it, j) => (j === i ? nv : it)));
+  const remove = (i: number) => () => onChange(value.filter((_, j) => j !== i));
+
+  // Colour-coded titles for object-array items so parts/seats read like the 3D markers.
+  const meta =
+    fieldKey === "parts"
+      ? describeRawParts(value.map((it) => (isPlainObject(it) ? { type: it.type as string, steer: it.steer as boolean } : {})))
+      : null;
+
   return (
     <div className="space-y-1.5">
-      {value.map((item, i) => (
-        <div key={i} className="flex items-start gap-2">
-          <div className="flex-1">
-            <Field
+      {value.map((item, i) => {
+        if (isPlainObject(item) && !isColor(item)) {
+          const m = meta?.[i];
+          return (
+            <ItemCard
+              key={i}
+              title={m?.label ?? `Item ${i + 1}`}
+              color={m?.color ?? "#6b7280"}
+              emoji={m?.emoji}
               value={item}
-              onChange={(nv) => onChange(value.map((it, j) => (j === i ? nv : it)))}
-              fieldKey={fieldKey}
+              onChange={replace(i)}
+              onRemove={remove(i)}
+              defaultOpen={value.length === 1}
             />
+          );
+        }
+        return (
+          <div key={i} className="flex items-start gap-2">
+            <div className="flex-1">
+              <Field value={item} onChange={replace(i)} fieldKey={fieldKey} />
+            </div>
+            <button
+              onClick={remove(i)}
+              title="Remove"
+              className="mt-0.5 rounded px-1.5 text-neutral-600 hover:bg-neutral-800 hover:text-red-400"
+            >
+              ×
+            </button>
           </div>
-          <button
-            onClick={() => onChange(value.filter((_, j) => j !== i))}
-            title="Remove"
-            className="mt-0.5 rounded px-1.5 text-neutral-600 hover:bg-neutral-800 hover:text-red-400"
-          >
-            ×
-          </button>
-        </div>
-      ))}
+        );
+      })}
       <button
         onClick={addItem}
-        className="rounded border border-dashed border-neutral-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:border-neutral-500 hover:text-neutral-200"
+        className="w-full rounded-md border border-dashed border-neutral-700 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-neutral-500 hover:text-neutral-200"
       >
         + Add
       </button>
+    </div>
+  );
+}
+
+/** A collapsible top-level section (one nested object/array, or the "General" group). */
+function Section({
+  title,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  badge?: string | number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/30">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-neutral-800/40"
+      >
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-neutral-300">{title}</span>
+        {badge != null && (
+          <span className="rounded-full bg-neutral-800 px-1.5 text-[10px] font-medium text-neutral-400">{badge}</span>
+        )}
+        <span className="ml-auto text-neutral-600">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="border-t border-neutral-800 px-3 py-2.5">{children}</div>}
     </div>
   );
 }
@@ -230,15 +347,41 @@ export default function ConfigForm({ text, onChange }: { text: string; onChange:
     setData(next);
     onChange(Hjson.stringify(next, { bracesSameLine: false, separator: false }));
   };
+  const setKey = (key: string) => (nv: Json) => update({ ...data, [key]: nv });
+
+  const keys = Object.keys(data);
+  const loose = keys.filter((k) => isInline(data[k])); // primitives → one "General" card
+  const sections = keys.filter((k) => !isInline(data[k])); // objects / arrays → their own section
 
   return (
-    <div className="flex-1 overflow-y-auto pr-1">
+    <div className="flex-1 space-y-2 overflow-y-auto pr-1">
       <datalist id={MATERIALS_LIST_ID}>
         {COMMON_MATERIALS.map((m) => (
           <option key={m} value={m} />
         ))}
       </datalist>
-      <ObjectField value={data} onChange={update} top />
+
+      {loose.length > 0 && (
+        <Section title="General">
+          <div className="space-y-2">
+            {loose.map((key) => (
+              <InlineRow key={key} label={labelize(key)} value={data[key]} onChange={setKey(key)} fieldKey={key} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {sections.map((key) => {
+        const v = data[key];
+        const badge = Array.isArray(v) ? v.length : undefined;
+        // Long arrays (parts) collapse the section by default; everything else opens.
+        const defaultOpen = !(Array.isArray(v) && v.length > 6);
+        return (
+          <Section key={key} title={labelize(key)} badge={badge} defaultOpen={defaultOpen}>
+            <Field value={v} onChange={setKey(key)} fieldKey={key} />
+          </Section>
+        );
+      })}
     </div>
   );
 }

@@ -33,6 +33,31 @@ function bucketFor(kind?: string): string {
   return k === "wheel" || k === "skin" || k === "rotor" || k === "turret" ? k : "part";
 }
 
+const SEAT_KINDS = new Set(["seat", "bikeseat", "turretseat", "controllable"]);
+
+/**
+ * Colour/icon/label for one raw V3 `parts[]` item (with `type` + `steer`), matching the 3D markers.
+ * Used by the config form so each part/seat card reads the same as its marker. Numbers per type across
+ * the whole list (Wheel 1..4, Driver seat, Seat 1..), like {@link describeElements}.
+ */
+export function describeRawParts(parts: { type?: string; steer?: boolean }[]): Pick<ElementInfo, "color" | "emoji" | "label">[] {
+  const bucketOf = (p: { type?: string; steer?: boolean }) => {
+    const t = (p.type ?? "").toLowerCase();
+    if (SEAT_KINDS.has(t)) return p.steer ? "driver" : "seat";
+    return bucketFor(t);
+  };
+  const totals: Record<string, number> = {};
+  for (const p of parts) totals[bucketOf(p)] = (totals[bucketOf(p)] ?? 0) + 1;
+  const seen: Record<string, number> = {};
+  return parts.map((p) => {
+    const b = bucketOf(p);
+    const st = STYLE[b] ?? STYLE.part;
+    const n = (seen[b] = (seen[b] ?? 0) + 1);
+    const base = b === "driver" ? "Driver seat" : st.label;
+    return { color: st.color, emoji: st.emoji, label: totals[b] > 1 ? `${base} ${n}` : base };
+  });
+}
+
 export function describeElements(def: VehicleDefinition): ElementInfo[] {
   const totals: Record<string, number> = {};
   const bump = (k: string) => (totals[k] = (totals[k] ?? 0) + 1);

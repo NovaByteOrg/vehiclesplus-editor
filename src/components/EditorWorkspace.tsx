@@ -739,13 +739,13 @@ function Inspector({
         </div>
       )}
 
-      <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-neutral-500">
-        {entry.category === "config" ? "Settings (config.yml)" : "Properties"}
-      </div>
+      {entry.category === "config" && (
+        <div className="px-4 pt-3 pb-1 text-[11px] uppercase tracking-wide text-neutral-500">Settings (config.yml)</div>
+      )}
       {parseError && entry.category === "vehicle" && (
         <div className="mx-3 mb-1 rounded bg-red-950/40 px-2 py-1 text-[11px] text-red-300">{parseError}</div>
       )}
-      <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+      <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-3">
         {entry.category === "config" ? (
           <textarea
             value={entry.text}

@@ -36,6 +36,13 @@ function saveBlob(blob: Blob, filename: string) {
 
 const CATEGORY_ORDER: Category[] = ["vehicle", "rim", "fuel", "vehicleType", "config"];
 const ADDABLE: Category[] = ["vehicle", "rim", "fuel", "vehicleType"];
+const CATEGORY_ICONS: Record<Category, string> = {
+  vehicle: "🚗",
+  rim: "🛞",
+  fuel: "⛽",
+  vehicleType: "🏷️",
+  config: "⚙️",
+};
 
 function selLabel(def: VehicleDefinition | null, sel: Selection): string {
   if (!def || !sel) return "";
@@ -566,16 +573,16 @@ function Nav({
   }
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-800">
+    <aside className="flex w-64 shrink-0 flex-col border-r border-neutral-800 bg-neutral-950/40">
       <div className="border-b border-neutral-800 p-2">
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search files…"
-          className="w-full rounded border border-neutral-800 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none focus:border-neutral-600"
+          className="w-full rounded-md border border-neutral-800 bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-200 outline-none transition focus:border-amber-500/60 focus:ring-1 focus:ring-amber-500/20"
         />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto py-1">
+      <div className="min-h-0 flex-1 overflow-y-auto py-2">
         {CATEGORY_ORDER.map((category) => {
           const all = grouped.get(category) ?? [];
           const items = q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all;
@@ -587,12 +594,15 @@ function Nav({
             if (!byGroup.has(g)) byGroup.set(g, []);
             byGroup.get(g)!.push(e);
           }
+          const groups = [...byGroup.entries()];
           return (
-            <div key={category} className="mb-1">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <span className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                  {CATEGORY_LABELS[category]} <span className="text-neutral-600">({all.length})</span>
+            <div key={category} className="mb-3">
+              <div className="flex items-center gap-2 px-3 pb-1">
+                <span className="text-[13px] leading-none">{CATEGORY_ICONS[category]}</span>
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+                  {CATEGORY_LABELS[category]}
                 </span>
+                <span className="rounded-full bg-neutral-800/80 px-1.5 text-[10px] font-medium text-neutral-500">{all.length}</span>
                 {ADDABLE.includes(category) && (
                   <button
                     onClick={() => {
@@ -600,14 +610,14 @@ function Nav({
                       setName("");
                     }}
                     title={`Add ${CATEGORY_LABELS[category]}`}
-                    className="rounded px-1.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-amber-400"
+                    className="ml-auto rounded px-1.5 text-base leading-none text-neutral-500 transition hover:bg-neutral-800 hover:text-amber-400"
                   >
                     +
                   </button>
                 )}
               </div>
               {adding === category && (
-                <div className="px-3 pb-1.5">
+                <div className="px-2 pb-1.5">
                   <input
                     autoFocus
                     value={name}
@@ -621,35 +631,48 @@ function Nav({
                     }}
                     onBlur={submitAdd}
                     placeholder={`New ${CATEGORY_LABELS[category].toLowerCase().replace(/s$/, "")} name…`}
-                    className="w-full rounded border border-amber-500/60 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none"
+                    className="w-full rounded-md border border-amber-500/60 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 outline-none"
                   />
                 </div>
               )}
-              {[...byGroup.entries()].map(([group, groupItems]) => (
+              {all.length === 0 && !q && adding !== category && (
+                <div className="px-3 py-0.5 text-[11px] italic text-neutral-600">none yet</div>
+              )}
+              {groups.map(([group, groupItems]) => (
                 <div key={group}>
-                  {group && <div className="px-4 py-0.5 text-[11px] text-neutral-600">{group}</div>}
-                  <ul>
-                    {groupItems.map((e) => (
-                      <li key={e.id} className="group/item flex items-center">
-                        <button
-                          onClick={() => onSelect(e.id)}
-                          className={`flex-1 truncate px-4 py-1 text-left text-sm ${
-                            e.id === selectedId
-                              ? "bg-neutral-800 text-neutral-100"
-                              : "text-neutral-300 hover:bg-neutral-900"
+                  {group && groups.length > 1 && (
+                    <div className="px-3 pt-1 pb-0.5 pl-3 text-[10px] font-medium uppercase tracking-wider text-neutral-600">
+                      {group}
+                    </div>
+                  )}
+                  <ul className="px-1.5">
+                    {groupItems.map((e) => {
+                      const sel = e.id === selectedId;
+                      return (
+                        <li
+                          key={e.id}
+                          className={`group/item flex items-center rounded-md border-l-2 transition ${
+                            sel
+                              ? "border-amber-400 bg-neutral-800/80"
+                              : "border-transparent hover:bg-neutral-800/40"
                           }`}
                         >
-                          {e.name}
-                        </button>
-                        <button
-                          onClick={() => onDelete(e.id)}
-                          title="Delete"
-                          className="px-2 text-neutral-600 opacity-0 hover:text-red-400 group-hover/item:opacity-100"
-                        >
-                          ×
-                        </button>
-                      </li>
-                    ))}
+                          <button
+                            onClick={() => onSelect(e.id)}
+                            className={`flex-1 truncate px-2 py-1 text-left text-[13px] ${sel ? "text-neutral-50" : "text-neutral-300"}`}
+                          >
+                            {e.name}
+                          </button>
+                          <button
+                            onClick={() => onDelete(e.id)}
+                            title="Delete"
+                            className="px-1.5 text-neutral-600 opacity-0 transition hover:text-red-400 group-hover/item:opacity-100"
+                          >
+                            ×
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               ))}

@@ -7,6 +7,7 @@
 
 import Hjson from "hjson";
 import { convertV3Model, type RimItem, type V3VehicleModel } from "./v3";
+import { definitionFromV4 } from "./v4";
 import type { VehicleDefinition } from "./vehicle";
 
 export type Category = "vehicle" | "rim" | "fuel" | "vehicleType" | "config";
@@ -30,6 +31,8 @@ export interface ProjectEntry {
   group?: string;
   /** Raw file text — the editable source of truth. */
   text: string;
+  /** Source format: "v3" HJSON (the bundled demo) or "v4" `.vppack` JSON (an in-game `/vp editor` session). Defaults to v3. */
+  format?: "v3" | "v4";
 }
 
 let idCounter = 0;
@@ -52,8 +55,9 @@ export function rimMap(entries: ProjectEntry[]): Map<string, RimItem> {
   return rims;
 }
 
-/** Parse + convert a vehicle entry to a VehicleDefinition (throws on invalid HJSON). */
+/** Parse + convert a vehicle entry to a VehicleDefinition (throws on invalid text). */
 export function vehicleDefinition(entry: ProjectEntry, rims: Map<string, RimItem>): VehicleDefinition {
+  if (entry.format === "v4") return definitionFromV4(entry.text);
   return convertV3Model(Hjson.parse(entry.text) as V3VehicleModel, rims);
 }
 

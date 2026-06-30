@@ -319,10 +319,19 @@ function Section({
   );
 }
 
-export default function ConfigForm({ text, onChange }: { text: string; onChange: (text: string) => void }) {
+export default function ConfigForm({
+  text,
+  onChange,
+  json = false,
+}: {
+  text: string;
+  onChange: (text: string) => void;
+  /** Serialise edits as strict JSON (V4 `.vppack`, read by the plugin's Gson) instead of HJSON (V3). */
+  json?: boolean;
+}) {
   const [data, setData] = useState<Json | null>(() => {
     try {
-      return Hjson.parse(text) as Json;
+      return Hjson.parse(text) as Json; // HJSON is a JSON superset, so this parses both
     } catch {
       return null;
     }
@@ -345,7 +354,7 @@ export default function ConfigForm({ text, onChange }: { text: string; onChange:
 
   const update = (next: Json) => {
     setData(next);
-    onChange(Hjson.stringify(next, { bracesSameLine: false, separator: false }));
+    onChange(json ? JSON.stringify(next, null, 2) : Hjson.stringify(next, { bracesSameLine: false, separator: false }));
   };
   const setKey = (key: string) => (nv: Json) => update({ ...data, [key]: nv });
 

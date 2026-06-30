@@ -94,6 +94,9 @@ export default function EditorWorkspace() {
   const [selection, setSelection] = useState<Selection>(null);
   const [hovered, setHovered] = useState<Selection>(null);
   const [showProblems, setShowProblems] = useState(false);
+  const [session, setSession] = useState<string | null>(null); // active /vp editor session code
+  const [applyCode, setApplyCode] = useState<string | null>(null); // shown after "Send to server"
+  const [sending, setSending] = useState(false);
   const lastDef = useRef<VehicleDefinition | null>(null);
   const lastEditKey = useRef("");
   const editTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -102,6 +105,64 @@ export default function EditorWorkspace() {
     const saved = localStorage.getItem("vp-theme");
     if (saved) setTheme(saved);
   }, []);
+
+  // `/vp editor` opens us at `/?session=<code>` — fetch the server's vehicle definitions and load them
+  // as editable V4 entries (instead of the demo). Edits are sent back via "Send to server".
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("session");
+    if (!code) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/session?code=${encodeURIComponent(code)}`);
+        if (!res.ok) {
+          setErrors([`Couldn't open server session "${code}" — it may have expired. Run /vp editor again.`]);
+          return;
+        }
+        const data = (await res.json()) as { vehicles?: Record<string, unknown>[] };
+        const vehicles = Array.isArray(data.vehicles) ? data.vehicles : [];
+        const loaded: ProjectEntry[] = vehicles.map((v) => {
+          const entry = createEntry("vehicle", String(v.id ?? "vehicle"), String(v.type ?? "cars"));
+          entry.text = JSON.stringify(v, null, 2);
+          entry.format = "v4";
+          return entry;
+        });
+        setEntries(loaded);
+        setSelectedId(loaded[0]?.id ?? null);
+        setSession(code);
+        resetHistory();
+        setErrors([]);
+      } catch (e) {
+        setErrors([`Session load failed: ${e instanceof Error ? e.message : String(e)}`]);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
+
+  // Push the edited V4 definitions back to the session store; the player runs /vp applyedits <code>.
+  async function sendToServer() {
+    setSending(true);
+    try {
+      const vehicles = entries
+        .filter((e) => e.category === "vehicle" && e.format === "v4")
+        .map((e) => JSON.parse(e.text));
+      const res = await fetch("/api/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vehicles }),
+      });
+      if (!res.ok) {
+        setErrors([`Send failed (${res.status}).`]);
+        return;
+      }
+      const { code } = (await res.json()) as { code: string };
+      setApplyCode(code);
+      setDirty(false);
+    } catch (e) {
+      setErrors([`Send failed: ${e instanceof Error ? e.message : String(e)}`]);
+    } finally {
+      setSending(false);
+    }
+  }
 
   function changeTheme(id: string) {
     setTheme(id);
@@ -114,9 +175,28 @@ export default function EditorWorkspace() {
     setHovered(null);
   }, [selectedId]);
 
-  // A part/seat was dragged in the 3D view — reverse the converter and write the offset back to V3.
+  // A part/seat was dragged in the 3D view — write the offset back to the config (V3 or V4).
   function onMovePart(kind: "part" | "seat", index: number, offset: [number, number, number]) {
     if (!selected || selected.category !== "vehicle" || index < 0) return;
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+
+    if (selected.format === "v4") {
+      // V4: ItemDisplay offsets are direct (no reflection/head transform); parts + seats are separate arrays.
+      let obj: { parts?: { offset?: number[] }[]; seats?: { offset?: number[] }[] };
+      try {
+        obj = JSON.parse(selected.text);
+      } catch {
+        return;
+      }
+      const target = (kind === "seat" ? obj.seats : obj.parts)?.[index];
+      if (!target) return;
+      target.offset = [r(offset[0]), r(offset[1]), r(offset[2])];
+      const text = JSON.stringify(obj, null, 2);
+      commit(entries.map((e) => (e.id === selectedId ? { ...e, text } : e)));
+      setRevision((v) => v + 1);
+      return;
+    }
+
     let obj: { parts?: Record<string, number>[] };
     try {
       obj = Hjson.parse(selected.text) as { parts?: Record<string, number>[] };
@@ -128,7 +208,6 @@ export default function EditorWorkspace() {
     // Both parts and seats bake the same +HEAD_Y_OFFSET into their display Y (head-item lift / rider mount), so reverse it for both.
     void kind;
     const head = HEAD_Y_OFFSET;
-    const r = (n: number) => Math.round(n * 1000) / 1000;
     part.xoffset = r(-offset[2]); // reverse (x,z)->(-z,-x) and the head-bone y offset
     part.yoffset = r(offset[1] - head);
     part.zoffset = r(-offset[0]);
@@ -281,8 +360,25 @@ export default function EditorWorkspace() {
           VehiclesPlus <span className="text-amber-400">Editor</span>
         </span>
         <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-400">{entries.length} files</span>
+        {session && (
+          <span className="flex items-center gap-1 rounded bg-green-500/15 px-2 py-0.5 text-xs text-green-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-green-400" /> connected to server
+          </span>
+        )}
         {dirty && <span className="text-xs text-amber-400">● unsaved</span>}
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {session && (
+            <>
+              <button
+                onClick={sendToServer}
+                disabled={sending || entries.length === 0}
+                className="rounded bg-green-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-green-400 disabled:opacity-40"
+              >
+                {sending ? "Sending…" : "Send to server"}
+              </button>
+              <span className="mx-1 h-4 w-px bg-neutral-700" />
+            </>
+          )}
           <button
             onClick={undo}
             disabled={hist.past.length === 0}
@@ -428,6 +524,36 @@ export default function EditorWorkspace() {
             <span className="ml-auto text-neutral-600">{showProblems ? "▾" : "▴"}</span>
           </button>
         </>
+      )}
+
+      {applyCode && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setApplyCode(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-neutral-700 bg-neutral-900 p-5 text-center shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold text-neutral-100">Edits ready to apply</h2>
+            <p className="mt-1 text-sm text-neutral-400">Run this in-game to apply your changes to the server:</p>
+            <div className="mt-3 flex items-center gap-2 rounded-md border border-neutral-700 bg-neutral-950 p-2">
+              <code className="flex-1 truncate text-left font-mono text-sm text-amber-300">/vp applyedits {applyCode}</code>
+              <button
+                onClick={() => navigator.clipboard?.writeText(`/vp applyedits ${applyCode}`)}
+                className="shrink-0 rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-700"
+              >
+                Copy
+              </button>
+            </div>
+            <button
+              onClick={() => setApplyCode(null)}
+              className="mt-4 rounded-md bg-amber-500 px-4 py-1.5 text-sm font-medium text-neutral-950 hover:bg-amber-400"
+            >
+              Done
+            </button>
+          </div>
+        </div>
       )}
     </main>
   );
@@ -662,7 +788,7 @@ function Inspector({
             className="flex-1 resize-none rounded border border-neutral-800 bg-neutral-900 p-3 font-mono text-xs text-neutral-200 outline-none focus:border-neutral-600"
           />
         ) : (
-          <ConfigForm key={`${entry.id}:${revision}`} text={entry.text} onChange={onText} />
+          <ConfigForm key={`${entry.id}:${revision}`} text={entry.text} onChange={onText} json={entry.format === "v4"} />
         )}
       </div>
     </aside>

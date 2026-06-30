@@ -8,15 +8,11 @@ import ConfigForm from "@/components/ConfigForm";
 import {
   CATEGORY_LABELS,
   createEntry,
-  exportProject,
-  loadProject,
   rimMap,
   vehicleDefinition,
   type Category,
   type ProjectEntry,
 } from "@/lib/project";
-import { fetchResourcePackFile } from "@/lib/migration";
-import { generateV4PackForAll } from "@/lib/generate-pack";
 import { loadResourcePack, resolveModelId, type ResourcePack } from "@/lib/resourcepack";
 import type { VehicleDefinition } from "@/lib/vehicle";
 import { describeElements } from "@/lib/elements";
@@ -24,15 +20,6 @@ import { HEAD_Y_OFFSET } from "@/lib/v3";
 import { DEFAULT_THEME, THEMES, themeViewport } from "@/lib/themes";
 import { validateProject } from "@/lib/validate";
 import type { Selection } from "@/components/VehicleViewer";
-
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 const CATEGORY_ORDER: Category[] = ["vehicle", "rim", "fuel", "vehicleType", "config"];
 const ADDABLE: Category[] = ["vehicle", "rim", "fuel", "vehicleType"];
@@ -98,10 +85,8 @@ export default function EditorWorkspace() {
   const [entries, setEntries] = useState<ProjectEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pack, setPack] = useState<ResourcePack | null>(null);
-  const [packFile, setPackFile] = useState<File | null>(null);
   const [tint, setTint] = useState<[number, number, number] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
   const [theme, setTheme] = useState(DEFAULT_THEME);
   const [hist, setHist] = useState<{ past: ProjectEntry[][]; future: ProjectEntry[][] }>({ past: [], future: [] });
   const [dirty, setDirty] = useState(false);
@@ -109,15 +94,11 @@ export default function EditorWorkspace() {
   const [selection, setSelection] = useState<Selection>(null);
   const [hovered, setHovered] = useState<Selection>(null);
   const [showProblems, setShowProblems] = useState(false);
-  const folderInput = useRef<HTMLInputElement>(null);
   const lastDef = useRef<VehicleDefinition | null>(null);
   const lastEditKey = useRef("");
   const editTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    if (folderInput.current) {
-      (folderInput.current as HTMLInputElement & { webkitdirectory?: boolean }).webkitdirectory = true;
-    }
     const saved = localStorage.getItem("vp-theme");
     if (saved) setTheme(saved);
   }, []);
@@ -243,57 +224,23 @@ export default function EditorWorkspace() {
     }
   }, [selected]);
 
-  async function onFolder(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setBusy(true);
-    try {
-      const { entries: loaded, resourcePackUrl, packZip } = await loadProject(files);
-      setEntries(loaded);
-      setSelectedId(loaded.find((e) => e.category === "vehicle")?.id ?? loaded[0]?.id ?? null);
-      resetHistory();
-      const errs: string[] = [];
-      if (loaded.length === 0) errs.push("No VehiclesPlus configs found in that folder.");
-      try {
-        if (packZip) {
-          setPack(await loadResourcePack(packZip));
-          setPackFile(packZip);
-        } else if (resourcePackUrl) {
-          const file = await fetchResourcePackFile(resourcePackUrl);
-          setPack(await loadResourcePack(file));
-          setPackFile(file);
-        }
-      } catch (e) {
-        errs.push(`Couldn't load the resource pack — add it manually. (${e instanceof Error ? e.message : e})`);
-      }
-      setErrors(errs);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function loadDemo() {
-    setBusy(true);
-    try {
-      const [carText, rimText, packBlob] = await Promise.all([
-        fetch("/demo/ExampleCar.hjson").then((r) => r.text()),
-        fetch("/demo/rim-default.hjson").then((r) => r.text()),
-        fetch("/demo/pack.zip").then((r) => r.blob()),
-      ]);
-      const car = createEntry("vehicle", "ExampleCar", "cars");
-      car.text = carText;
-      const rim = createEntry("rim", "default");
-      rim.text = rimText;
-      const fuel = createEntry("fuel", "gasoline");
-      setEntries([car, rim, fuel]);
-      setSelectedId(car.id);
-      resetHistory();
-      const file = new File([packBlob], "pack.zip", { type: "application/zip" });
-      setPack(await loadResourcePack(file));
-      setPackFile(file);
-      setErrors([]);
-    } finally {
-      setBusy(false);
-    }
+    const [carText, rimText, packBlob] = await Promise.all([
+      fetch("/demo/ExampleCar.hjson").then((r) => r.text()),
+      fetch("/demo/rim-default.hjson").then((r) => r.text()),
+      fetch("/demo/pack.zip").then((r) => r.blob()),
+    ]);
+    const car = createEntry("vehicle", "ExampleCar", "cars");
+    car.text = carText;
+    const rim = createEntry("rim", "default");
+    rim.text = rimText;
+    const fuel = createEntry("fuel", "gasoline");
+    setEntries([car, rim, fuel]);
+    setSelectedId(car.id);
+    resetHistory();
+    const file = new File([packBlob], "pack.zip", { type: "application/zip" });
+    setPack(await loadResourcePack(file));
+    setErrors([]);
   }
 
   function updateText(text: string) {
@@ -316,32 +263,6 @@ export default function EditorWorkspace() {
     const entry = createEntry(category, trimmed, category === "vehicle" ? group || "cars" : undefined);
     commit([...entries, entry]);
     setSelectedId(entry.id);
-  }
-
-  async function exportFolder() {
-    if (entries.length === 0) return;
-    saveBlob(await exportProject(entries), "VehiclesPlus.zip");
-    setDirty(false);
-  }
-
-  async function generatePack() {
-    if (!pack || !packFile) return;
-    setBusy(true);
-    try {
-      const defs: VehicleDefinition[] = [];
-      for (const e of entries) {
-        if (e.category !== "vehicle") continue;
-        try {
-          defs.push(vehicleDefinition(e, rims));
-        } catch {
-          /* skip invalid */
-        }
-      }
-      const { blob } = await generateV4PackForAll(packFile, pack, defs);
-      saveBlob(blob, "vehiclesplus-v4-pack.zip");
-    } finally {
-      setBusy(false);
-    }
   }
 
   const grouped = useMemo(() => {
@@ -381,43 +302,7 @@ export default function EditorWorkspace() {
             ↷
           </button>
           <span className="mx-1 h-4 w-px bg-neutral-700" />
-          <input
-            ref={folderInput}
-            type="file"
-            className="hidden"
-            onChange={(e) => {
-              onFolder(e.target.files);
-              e.target.value = "";
-            }}
-          />
-          <button
-            onClick={() => folderInput.current?.click()}
-            disabled={busy}
-            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-40"
-          >
-            {busy ? "Loading…" : "Open plugin folder"}
-          </button>
-          <ResourcePackPicker
-            onLoad={(loaded, file) => {
-              setPack(loaded);
-              setPackFile(file ?? null);
-            }}
-          />
-          <span className="mx-1 h-4 w-px bg-neutral-700" />
-          <button
-            onClick={generatePack}
-            disabled={!pack || !packFile || busy}
-            className="rounded bg-neutral-800 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-700 disabled:opacity-40"
-          >
-            Generate V4 pack
-          </button>
-          <button
-            onClick={exportFolder}
-            disabled={entries.length === 0}
-            className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950 hover:bg-amber-400 disabled:opacity-40"
-          >
-            Export folder
-          </button>
+          <ResourcePackPicker onLoad={(loaded) => setPack(loaded)} />
           <span className="mx-1 h-4 w-px bg-neutral-700" />
           <select
             value={theme}
@@ -436,7 +321,7 @@ export default function EditorWorkspace() {
       </header>
 
       {entries.length === 0 ? (
-        <EmptyState onOpen={() => folderInput.current?.click()} onDemo={loadDemo} errors={errors} />
+        <EmptyState onDemo={loadDemo} errors={errors} />
       ) : (
         <div className="flex min-h-0 flex-1">
           <Nav
@@ -784,27 +669,21 @@ function Inspector({
   );
 }
 
-function EmptyState({ onOpen, onDemo, errors }: { onOpen: () => void; onDemo: () => void; errors: string[] }) {
+function EmptyState({ onDemo, errors }: { onDemo: () => void; errors: string[] }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="max-w-md space-y-4">
-        <h1 className="text-2xl font-semibold">Edit your VehiclesPlus pack</h1>
+        <h1 className="text-2xl font-semibold">VehiclesPlus Editor</h1>
         <p className="text-sm text-neutral-400">
-          Open your whole <code className="text-neutral-300">plugins/VehiclesPlus</code> folder — vehicles, rim designs,
-          fuel types and vehicle types all become editable, and the resource pack loads from your config.
+          This editor opens from an in-game command and syncs live with your server — that connection is coming soon.
+          For now, load the demo to explore the editor.
         </p>
         <button
-          onClick={onOpen}
+          onClick={onDemo}
           className="rounded bg-amber-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-amber-400"
         >
-          Open plugin folder
+          Load the demo
         </button>
-        <p className="text-xs text-neutral-500">
-          or{" "}
-          <button onClick={onDemo} className="underline hover:text-neutral-300">
-            try the demo
-          </button>
-        </p>
       </div>
       {errors.length > 0 && <p className="text-xs text-red-400">{errors[0]}</p>}
     </div>

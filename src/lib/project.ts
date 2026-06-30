@@ -1,14 +1,12 @@
 /**
- * The editor's project model: the whole `plugins/VehiclesPlus` folder, parsed into editable entries
- * that keep the original folder structure. The raw HJSON/YAML text is the source of truth (so every
- * field stays visible + editable); vehicles additionally parse → convert to a VehicleDefinition for
- * the 3D view. Export writes everything back under `VehiclesPlus/<path>`, preserving the layout.
+ * The editor's project model: VehiclesPlus configs as editable entries that keep the original folder
+ * structure. The raw HJSON/YAML text is the source of truth (so every field stays visible + editable);
+ * vehicles additionally parse → convert to a VehicleDefinition for the 3D view. Data is loaded from the
+ * bundled demo today and will come from the live in-game sync later.
  */
 
 import Hjson from "hjson";
-import JSZip from "jszip";
 import { convertV3Model, type RimItem, type V3VehicleModel } from "./v3";
-import { extractResourcePackUrl } from "./migration";
 import type { VehicleDefinition } from "./vehicle";
 
 export type Category = "vehicle" | "rim" | "fuel" | "vehicleType" | "config";
@@ -34,52 +32,9 @@ export interface ProjectEntry {
   text: string;
 }
 
-export interface LoadedProject {
-  entries: ProjectEntry[];
-  resourcePackUrl: string | null;
-  packZip: File | null;
-}
-
-function relativePath(file: File): string {
-  return (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-}
-
-/** Categorise a file path (any prefix) into a category + the path relative to the VehiclesPlus root. */
-function classify(fullPath: string): { category: Category; path: string; group?: string; name: string } | null {
-  let m = fullPath.match(/(?:^|\/)(vehicles\/([^/]+)\/([^/]+))\.(hjson|json)$/i);
-  if (m) return { category: "vehicle", path: `${m[1]}.${m[4]}`, group: m[2], name: m[3] };
-  m = fullPath.match(/(?:^|\/)(rims\/([^/]+))\.(hjson|json)$/i);
-  if (m) return { category: "rim", path: `${m[1]}.${m[3]}`, name: m[2] };
-  m = fullPath.match(/(?:^|\/)(fuels\/([^/]+))\.(hjson|json)$/i);
-  if (m) return { category: "fuel", path: `${m[1]}.${m[3]}`, name: m[2] };
-  m = fullPath.match(/(?:^|\/)(vehicletypes\/([^/]+))\.(hjson|json)$/i);
-  if (m) return { category: "vehicleType", path: `${m[1]}.${m[3]}`, name: m[2] };
-  if (/(?:^|\/)config\.ya?ml$/i.test(fullPath)) return { category: "config", path: "config.yml", name: "config" };
-  return null;
-}
-
 let idCounter = 0;
 function nextId(): string {
   return `e${++idCounter}`;
-}
-
-/** Load a whole `plugins/VehiclesPlus` folder upload into project entries. */
-export async function loadProject(files: FileList | File[]): Promise<LoadedProject> {
-  const all = Array.from(files);
-  const entries: ProjectEntry[] = [];
-  let resourcePackUrl: string | null = null;
-
-  for (const file of all) {
-    const rel = relativePath(file);
-    const info = classify(rel);
-    if (!info) continue;
-    const text = await file.text();
-    if (info.category === "config") resourcePackUrl = extractResourcePackUrl(text);
-    entries.push({ id: nextId(), category: info.category, path: info.path, name: info.name, group: info.group, text });
-  }
-
-  const packZip = all.find((f) => /\.zip$/i.test(f.name)) ?? null;
-  return { entries, resourcePackUrl, packZip };
 }
 
 /** Rim-design map (rimDesignId → skin item) used to resolve wheel models, built from the rim entries. */
@@ -150,14 +105,4 @@ export function createEntry(category: Category, name: string, group?: string): P
     group: category === "vehicle" ? (group ?? "cars") : undefined,
     text: newEntryTemplate(category, name),
   };
-}
-
-/** Export every entry back to a zip mirroring `plugins/VehiclesPlus/<path>`. */
-export async function exportProject(entries: ProjectEntry[]): Promise<Blob> {
-  const zip = new JSZip();
-  const root = zip.folder("VehiclesPlus")!;
-  for (const entry of entries) {
-    root.file(entry.path, entry.text);
-  }
-  return zip.generateAsync({ type: "blob" });
 }

@@ -15,6 +15,7 @@ import {
   resolveModel,
   resolveModelId,
   resolveTexture,
+  type McDisplay,
   type ResolvedModel,
   type ResourcePack,
 } from "./resourcepack";
@@ -166,6 +167,29 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), faceMaterial(resolveTexture(pack, model.textures, ref)));
   mesh.position.set(0.5, 0.5, 0.5); // centred after the -0.5 model-space shift
   return mesh;
+}
+
+/**
+ * The exact transform `buildModelObject` applies on top of a part's element geometry (block units):
+ * `Scale(0.625) · Translate(display.head.t/16) · Rotate(display.head.r) · Scale(display.head.s) · Translate(-0.5)`.
+ * Exposed so the V3→V4 converter can BAKE this same head/display/0.625 transform into the exported
+ * `.bbmodel` geometry (keep these two in sync — both encode how a V3 head item is rendered).
+ */
+export function partModelMatrix(display?: McDisplay): THREE.Matrix4 {
+  const m = new THREE.Matrix4().makeScale(HEAD_ITEM_SCALE, HEAD_ITEM_SCALE, HEAD_ITEM_SCALE);
+  if (display) {
+    if (display.translation) {
+      m.multiply(new THREE.Matrix4().makeTranslation(display.translation[0] / 16, display.translation[1] / 16, display.translation[2] / 16));
+    }
+    if (display.rotation) {
+      const e = new THREE.Euler(display.rotation[0] * DEG, display.rotation[1] * DEG, display.rotation[2] * DEG);
+      m.multiply(new THREE.Matrix4().makeRotationFromEuler(e));
+    }
+    if (display.scale) {
+      m.multiply(new THREE.Matrix4().makeScale(display.scale[0], display.scale[1], display.scale[2]));
+    }
+  }
+  return m.multiply(new THREE.Matrix4().makeTranslation(-0.5, -0.5, -0.5));
 }
 
 export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?: THREE.Color): THREE.Object3D {

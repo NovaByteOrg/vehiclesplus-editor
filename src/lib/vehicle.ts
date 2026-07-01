@@ -7,6 +7,15 @@
  */
 
 export type Vec3 = [number, number, number];
+export type Quat = [number, number, number, number]; // [x, y, z, w]
+
+/** A full Bukkit Transformation (translation + leftRotation·scale·rightRotation), used by converted parts. */
+export interface PartTransform {
+  translation: Vec3;
+  leftRotation: Quat;
+  scale: Vec3;
+  rightRotation: Quat;
+}
 
 export interface PartDef {
   id: string;
@@ -14,6 +23,8 @@ export interface PartDef {
   kind?: string;
   /** Local offset from the vehicle root, in blocks: [x, y, z]. */
   offset: Vec3;
+  /** Optional full render transform (converted parts) — supersedes offset/rotation/scale when present. */
+  transform?: PartTransform;
   /** Local rotation as [pitch, yaw, roll] in degrees. */
   rotation?: Vec3;
   /** Per-axis scale factors. */

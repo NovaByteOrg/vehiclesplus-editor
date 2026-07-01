@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { Bounds, Grid, Html, OrbitControls, TransformControls } from "@react-three/drei";
-import { MATERIAL_COLORS, type PartDef, type VehicleDefinition } from "@/lib/vehicle";
+import { MATERIAL_COLORS, type PartDef, type PartTransform, type VehicleDefinition } from "@/lib/vehicle";
 import { buildPartModel } from "@/lib/mc-model";
 import { describeElements, type ElementInfo } from "@/lib/elements";
 import type { ResourcePack } from "@/lib/resourcepack";
@@ -34,6 +34,16 @@ interface Node {
   isSeat: boolean;
 }
 
+/** A full Bukkit Transformation as a Three.js matrix: Translate · leftRotation · Scale · rightRotation. */
+function transformMatrix(t: PartTransform): THREE.Matrix4 {
+  const m = new THREE.Matrix4().compose(
+    new THREE.Vector3(...t.translation),
+    new THREE.Quaternion(...t.leftRotation),
+    new THREE.Vector3(...t.scale),
+  );
+  return m.multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion(...t.rightRotation)));
+}
+
 /** Renders a part's resource-pack model (or a coloured box fallback) at its offset. Click selects it. */
 function Part({
   part,
@@ -49,15 +59,33 @@ function Part({
   // Ref to this part's group, set only while it's selected — lets the gizmo move the model live during a drag.
   bindModelRef?: (o: THREE.Object3D | null) => void;
 }) {
+  const onClick = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    onSelect();
+  };
+
+  // Converted parts carry a full transform (translation + rotations + scale) — apply it as the group matrix.
+  if (part.transform) {
+    return (
+      <group ref={bindModelRef} matrixAutoUpdate={false} matrix={transformMatrix(part.transform)} onClick={onClick}>
+        {model ? (
+          <primitive object={model} />
+        ) : (
+          <mesh castShadow>
+            <boxGeometry args={[1, 1, 1]} />
+            <meshStandardMaterial color="#b07d4f" metalness={0.2} roughness={0.7} />
+          </mesh>
+        )}
+      </group>
+    );
+  }
+
   const [x, y, z] = part.offset;
   const [pitch, yaw, roll] = part.rotation ?? [0, 0, 0];
   const common = {
     position: [x, y, z] as [number, number, number],
     rotation: [pitch * DEG, yaw * DEG, roll * DEG] as [number, number, number],
-    onClick: (e: { stopPropagation: () => void }) => {
-      e.stopPropagation();
-      onSelect();
-    },
+    onClick,
   };
 
   if (model) {
@@ -185,10 +213,16 @@ function GroundedVehicle({ definition, pack, tint, selection, hovered, onSelect,
     const infos = new Map(describeElements(definition).map((e) => [`${e.selKind}:${e.index}`, e]));
     const list: Node[] = [];
     definition.parts.forEach((part, i) => {
-      const rot = part.rotation ?? [0, 0, 0];
-      const euler = new THREE.Euler(rot[0] * DEG, rot[1] * DEG, rot[2] * DEG);
-      const center = built[i]?.center ?? new THREE.Vector3();
-      const p = center.clone().applyEuler(euler).add(new THREE.Vector3(...part.offset));
+      let p: THREE.Vector3;
+      if (part.transform) {
+        // Converted part: anchor the marker at the transform's translation.
+        p = new THREE.Vector3(...part.transform.translation);
+      } else {
+        const rot = part.rotation ?? [0, 0, 0];
+        const euler = new THREE.Euler(rot[0] * DEG, rot[1] * DEG, rot[2] * DEG);
+        const center = built[i]?.center ?? new THREE.Vector3();
+        p = center.clone().applyEuler(euler).add(new THREE.Vector3(...part.offset));
+      }
       const info = infos.get(`part:${part.sourceIndex}`);
       if (info) list.push({ sel: { kind: "part", index: part.sourceIndex ?? -1 }, info, pos: [p.x, p.y, p.z], isSeat: false });
     });

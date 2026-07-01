@@ -157,8 +157,9 @@ export default function ConvertPage() {
               <tr>
                 <th className="py-1">Vehicle</th>
                 <th>Parts</th>
-                <th>Elements</th>
-                <th>Textures</th>
+                <th>.bbmodel elements</th>
+                <th>RP models</th>
+                <th>RP textures</th>
               </tr>
             </thead>
             <tbody className="text-neutral-300">
@@ -167,11 +168,17 @@ export default function ConvertPage() {
                   <td className="py-1 font-medium">{v.id}</td>
                   <td>{v.parts}</td>
                   <td>{v.elements}</td>
-                  <td>{v.textures}</td>
+                  <td>{v.rpModels}</td>
+                  <td>{v.rpTextures}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <p className="mt-2 text-[11px] text-neutral-500">
+            The zip contains <code>definitions/</code> (V4 <code>.vppack</code>), <code>models/</code> (editable
+            <code> .bbmodel</code>), and <code>resourcepack/</code> — install the resource pack, then apply the
+            definitions in-game to see the vehicles render.
+          </p>
           {result.warnings.length > 0 && (
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-amber-400">{result.warnings.length} warning(s)</summary>

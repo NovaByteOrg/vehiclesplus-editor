@@ -9,13 +9,21 @@
  * (the plugin's Gson reads strict JSON, not HJSON). See {@link ./vehicle} for the shared contract.
  */
 
-import type { PartDef, SeatDef, Vec3, VehicleDefinition } from "./vehicle";
+import type { PartDef, PartTransform, Quat, SeatDef, Vec3, VehicleDefinition } from "./vehicle";
+
+interface RawV4Transform {
+  translation?: number[];
+  leftRotation?: number[];
+  scale?: number[];
+  rightRotation?: number[];
+}
 
 interface RawV4Part {
   id?: string;
   offset?: number[];
   rotation?: number[];
   scale?: number[];
+  transform?: RawV4Transform;
   itemModel?: string;
   baseMaterial?: string;
   customModelData?: number | null;
@@ -43,6 +51,21 @@ function vec3(xyz: number[] | undefined, fallback: number): Vec3 {
   return [xyz[0], xyz[1], xyz[2]];
 }
 
+function quat(q: number[] | undefined): Quat {
+  if (!q || q.length < 4) return [0, 0, 0, 1];
+  return [q[0], q[1], q[2], q[3]];
+}
+
+function partTransform(t: RawV4Transform | undefined): PartTransform | undefined {
+  if (!t || !t.translation) return undefined;
+  return {
+    translation: vec3(t.translation, 0),
+    leftRotation: quat(t.leftRotation),
+    scale: vec3(t.scale, 1),
+    rightRotation: quat(t.rightRotation),
+  };
+}
+
 /** Best-effort marker bucket from a part id (V4 parts carry no explicit type). */
 function kindFromId(id: string | undefined): string {
   const s = (id ?? "").toLowerCase();
@@ -60,6 +83,7 @@ export function definitionFromV4(text: string): VehicleDefinition {
     id: p.id ?? `part_${i}`,
     kind: kindFromId(p.id),
     offset: vec3(p.offset, 0),
+    transform: partTransform(p.transform),
     rotation: p.rotation ? vec3(p.rotation, 0) : undefined,
     scale: p.scale ? vec3(p.scale, 1) : undefined,
     itemModel: p.itemModel,

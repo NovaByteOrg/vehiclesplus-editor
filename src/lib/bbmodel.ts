@@ -190,6 +190,85 @@ function alignedToHeading(def: VehicleDefinition, pack: ResourcePack): VehicleDe
   };
 }
 
+/** A part's cubes as world-space AABBs under its render transform: `t + R·S·(p/16 − 0.5)`. */
+function worldBoxes(meta: BbPartMeta, cubes: { from: Vec3; to: Vec3 }[]): { min: Vec3; max: Vec3 }[] {
+  const t = meta.transform;
+  const q = new THREE.Quaternion(...t.leftRotation);
+  const boxes: { min: Vec3; max: Vec3 }[] = [];
+  for (const c of cubes) {
+    const min: Vec3 = [Infinity, Infinity, Infinity];
+    const max: Vec3 = [-Infinity, -Infinity, -Infinity];
+    for (const x of [c.from[0], c.to[0]])
+      for (const y of [c.from[1], c.to[1]])
+        for (const z of [c.from[2], c.to[2]]) {
+          const v = new THREE.Vector3(
+            (x / 16 - 0.5) * t.scale[0],
+            (y / 16 - 0.5) * t.scale[1],
+            (z / 16 - 0.5) * t.scale[2],
+          ).applyQuaternion(q);
+          const w: Vec3 = [v.x + t.translation[0], v.y + t.translation[1], v.z + t.translation[2]];
+          for (let i = 0; i < 3; i++) {
+            min[i] = Math.min(min[i], w[i]);
+            max[i] = Math.max(max[i], w[i]);
+          }
+        }
+    boxes.push({ min, max });
+  }
+  return boxes;
+}
+
+/**
+ * A spinning rotor shouldn't sweep through the body. Some models place tall tail structures (the
+ * heli's vertical tail rotor) just inside the main rotor's radius — nudge the rotor FORWARD (+Z, away
+ * from the tail) the minimal amount so its swept disc clears everything behind it. The inner half of
+ * the sweep is exempt (the disc legitimately sits close to the mast/roof).
+ */
+function adjustRotorClearance(
+  parts: BbPartMeta[],
+  cubesByPart: Map<string, { from: Vec3; to: Vec3 }[]>,
+  warnings: string[],
+): void {
+  for (const rotor of parts) {
+    if (!rotor.id.toLowerCase().includes("rotor")) continue;
+    const discBoxes = worldBoxes(rotor, cubesByPart.get(rotor.id) ?? []);
+    if (discBoxes.length === 0) continue;
+    let discMinY = Infinity;
+    let discMaxY = -Infinity;
+    let radius = 0;
+    const hub: [number, number] = [rotor.transform.translation[0], rotor.transform.translation[2]];
+    for (const b of discBoxes) {
+      discMinY = Math.min(discMinY, b.min[1]);
+      discMaxY = Math.max(discMaxY, b.max[1]);
+      for (const corner of [b.min, b.max]) {
+        radius = Math.max(radius, Math.hypot(corner[0] - hub[0], corner[2] - hub[1]));
+      }
+    }
+
+    let shift = 0;
+    for (const other of parts) {
+      if (other === rotor || other.id.toLowerCase().includes("rotor")) continue;
+      for (const b of worldBoxes(other, cubesByPart.get(other.id) ?? [])) {
+        // Only geometry actually crossing the disc plane counts — structures safely below the disc
+        // (tail booms) or above it (tail fins) are fine even inside the radius.
+        if (b.max[1] < discMinY - 0.1 || b.min[1] > discMaxY + 0.1) continue;
+        const nx = Math.max(b.min[0], Math.min(hub[0], b.max[0]));
+        const nz = Math.max(b.min[2], Math.min(hub[1], b.max[2]));
+        const d = Math.hypot(nx - hub[0], nz - hub[1]);
+        if (d >= radius || d < radius * 0.5) continue; // clear, or inner sweep (mast/roof) — expected
+        if (b.max[2] < hub[1]) {
+          shift = Math.max(shift, radius - d + 0.1);
+        }
+      }
+    }
+    if (shift > 0 && shift <= 1.2) {
+      rotor.transform.translation[2] += shift;
+      warnings.push(`Rotor "${rotor.id}" swept through body geometry — nudged ${shift.toFixed(2)} forward to clear.`);
+    } else if (shift > 1.2) {
+      warnings.push(`Rotor "${rotor.id}" sweeps through body geometry (needs ${shift.toFixed(2)} clearance) — left as authored.`);
+    }
+  }
+}
+
 /** Convert a (V3-converted) vehicle definition + resource pack into a BlockBench `.bbmodel` project. */
 export async function vehicleToBbmodel(
   sourceDef: VehicleDefinition,
@@ -204,6 +283,8 @@ export async function vehicleToBbmodel(
   const textures: BbTexture[] = [];
   const urlToIndex = new Map<string, number>();
   const partsMeta: BbPartMeta[] = [];
+  // Raw cubes per part, for the rotor sweep-clearance pass below.
+  const rawCubes = new Map<string, { from: Vec3; to: Vec3 }[]>();
 
   for (const part of def.parts) {
     const modelId = part.itemModel ?? resolveModelId(pack, part.baseMaterial, part.customModelData);
@@ -235,11 +316,14 @@ export async function vehicleToBbmodel(
     };
 
     const childUuids: string[] = [];
+    const cubes: { from: Vec3; to: Vec3 }[] = [];
     for (const el of model.elements) {
       const cube = toCube(el, textureIndexFor);
       elements.push(cube);
       childUuids.push(cube.uuid as string);
+      cubes.push({ from: cube.from as Vec3, to: cube.to as Vec3 });
     }
+    rawCubes.set(part.id, cubes);
 
     outliner.push({
       name: part.id,
@@ -263,6 +347,8 @@ export async function vehicleToBbmodel(
       color: part.color,
     });
   }
+
+  adjustRotorClearance(partsMeta, rawCubes, warnings);
 
   // Replace each texture's source URL with its embedded base64 (fetched in parallel).
   await Promise.all(

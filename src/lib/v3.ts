@@ -51,6 +51,13 @@ interface V3Upgradable {
   base?: number;
 }
 
+interface V3Sound {
+  sound?: string;
+  volume?: number;
+  pitch?: number;
+  duration?: number;
+}
+
 export interface V3VehicleModel {
   id?: string;
   displayName?: string;
@@ -60,6 +67,7 @@ export interface V3VehicleModel {
   turningRadius?: V3Upgradable;
   parts?: V3Part[];
   availableColors?: { red?: number; green?: number; blue?: number }[];
+  sounds?: Record<string, V3Sound>;
 }
 
 const SEAT_TYPES = new Set(["seat", "bikeseat", "turretseat", "controllable"]);
@@ -188,7 +196,19 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     colors: (model.availableColors ?? []).map(
       (c) => [c.red ?? 0, c.green ?? 0, c.blue ?? 0] as [number, number, number],
     ),
+    sounds: convertSounds(model.sounds),
   };
+}
+
+/** Carry the V3 engine-sound slots through (idle/start/accelerate/driving/slowingDown). */
+function convertSounds(sounds?: Record<string, V3Sound>): VehicleDefinition["sounds"] {
+  if (!sounds) return undefined;
+  const out: NonNullable<VehicleDefinition["sounds"]> = {};
+  for (const [slot, s] of Object.entries(sounds)) {
+    if (!s?.sound) continue;
+    out[slot] = { sound: s.sound, volume: s.volume ?? 1, pitch: s.pitch ?? 1, duration: s.duration ?? 2 };
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /**

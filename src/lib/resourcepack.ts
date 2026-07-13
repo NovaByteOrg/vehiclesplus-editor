@@ -54,6 +54,10 @@ export interface ResourcePack {
   models: Map<string, McModel>; // "ns:path" -> model JSON
   items: Map<string, McItemDefinition>; // "ns:id" -> item definition (1.21.x)
   textures: Map<string, string>; // "ns:path" -> object URL (png)
+  /** Sound event name (as V3 configs reference it, e.g. "vp.idle") -> first sound file id ("vp:vehicles/idle"). */
+  soundEvents: Map<string, string>;
+  /** Sound file id ("ns:path") -> object URL (ogg). */
+  sounds: Map<string, string>;
 }
 
 export interface ResolvedModel {
@@ -67,11 +71,18 @@ function normalizeId(id: string): string {
   return id.includes(":") ? id : `minecraft:${id}`;
 }
 
+/** A sounds.json event: `sounds` entries are either plain file ids or `{ name }` objects. */
+interface McSoundEvent {
+  sounds?: (string | { name?: string })[];
+}
+
 export async function loadResourcePack(file: File | Blob): Promise<ResourcePack> {
   const zip = await JSZip.loadAsync(file);
   const models = new Map<string, McModel>();
   const items = new Map<string, McItemDefinition>();
   const textures = new Map<string, string>();
+  const soundEvents = new Map<string, string>();
+  const sounds = new Map<string, string>();
 
   for (const entry of Object.values(zip.files)) {
     if (entry.dir) continue;
@@ -102,9 +113,38 @@ export async function loadResourcePack(file: File | Blob): Promise<ResourcePack>
     if (texture) {
       const blob = await entry.async("blob");
       textures.set(`${texture[1]}:${texture[2]}`, URL.createObjectURL(blob));
+      continue;
+    }
+    const soundsJson = name.match(/^assets\/([^/]+)\/sounds\.json$/);
+    if (soundsJson) {
+      try {
+        const ns = soundsJson[1];
+        const events = JSON.parse(await entry.async("string")) as Record<string, McSoundEvent>;
+        for (const [key, event] of Object.entries(events)) {
+          const first = event.sounds?.[0];
+          const fileId = typeof first === "string" ? first : first?.name;
+          if (!fileId) continue;
+          // V3 configs reference minecraft-namespace events bare ("vp.idle"); others as "ns:key".
+          soundEvents.set(ns === "minecraft" ? key : `${ns}:${key}`, normalizeId(fileId));
+        }
+      } catch {
+        // skip malformed sounds.json
+      }
+      continue;
+    }
+    const sound = name.match(/^assets\/([^/]+)\/sounds\/(.+)\.ogg$/);
+    if (sound) {
+      const blob = await entry.async("blob");
+      sounds.set(`${sound[1]}:${sound[2]}`, URL.createObjectURL(blob));
     }
   }
-  return { models, items, textures };
+  return { models, items, textures, soundEvents, sounds };
+}
+
+/** Resolve a V3 sound-event reference (e.g. "vp.idle") to the loaded ogg's object URL, or null. */
+export function resolveSound(pack: ResourcePack, eventName: string): string | null {
+  const fileId = pack.soundEvents.get(eventName) ?? pack.soundEvents.get(normalizeId(eventName));
+  return fileId ? (pack.sounds.get(fileId) ?? null) : null;
 }
 
 /**

@@ -57,6 +57,16 @@ export interface VehiclePhysics {
   mass: number;
 }
 
+/** One engine-sound slot (V3 `sounds.idle` etc.): the event name + how it's played. */
+export interface VehicleSound {
+  /** The sound-event name as the source pack defines it (e.g. "vp.idle"). */
+  sound: string;
+  volume: number;
+  pitch: number;
+  /** Clip length in seconds — the interval at which a looping slot re-triggers. */
+  duration: number;
+}
+
 export interface VehicleDefinition {
   id: string;
   name: string;
@@ -67,6 +77,8 @@ export interface VehicleDefinition {
   seats?: SeatDef[];
   /** Selectable paint colours (RGB 0-255), from V3 availableColors. */
   colors?: [number, number, number][];
+  /** Engine sounds by slot ("idle" | "start" | "accelerate" | "driving" | "slowingDown"). */
+  sounds?: Record<string, VehicleSound>;
 }
 
 /**

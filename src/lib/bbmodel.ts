@@ -22,13 +22,14 @@ import { partModelMatrix } from "./mc-model";
 import {
   resolveModel,
   resolveModelId,
+  resolveSound,
   resolveTexture,
   resolveTextureRef,
   type McDisplay,
   type McElement,
   type ResourcePack,
 } from "./resourcepack";
-import type { PartTransform, Vec3, VehicleDefinition, VehiclePhysics } from "./vehicle";
+import type { PartTransform, Vec3, VehicleDefinition, VehiclePhysics, VehicleSound } from "./vehicle";
 
 const DEG = Math.PI / 180;
 const AXIS_INDEX = { x: 0, y: 1, z: 2 } as const;
@@ -52,6 +53,12 @@ export interface BbSeatMeta {
   driver: boolean;
 }
 
+/** One engine-sound slot in the metadata: the playback settings + the embedded ogg. */
+export interface BbSoundMeta extends VehicleSound {
+  /** The clip, embedded as `data:audio/ogg;base64,...` (absent if the pack didn't ship it). */
+  data?: string;
+}
+
 /** The custom `vehiclesplus` object embedded in the `.bbmodel` — the whole vehicle definition. */
 export interface VehiclesPlusMeta {
   schemaVersion: number;
@@ -61,6 +68,8 @@ export interface VehiclesPlusMeta {
   physics?: VehiclePhysics;
   parts: BbPartMeta[];
   seats: BbSeatMeta[];
+  /** Engine sounds by slot ("idle" | "start" | "driving" | ...), clips embedded. */
+  sounds?: Record<string, BbSoundMeta>;
 }
 
 interface BbTexture {
@@ -73,15 +82,15 @@ interface BbTexture {
   refId?: string;
 }
 
-/** Fetch a resolved texture URL and base64-encode it as a `.bbmodel` data-URL source. */
-async function fetchAsDataUrl(url: string): Promise<string | null> {
+/** Fetch a resolved asset URL and base64-encode it as a `.bbmodel` data-URL source. */
+async function fetchAsDataUrl(url: string, mime = "image/png"): Promise<string | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
     const buf = new Uint8Array(await res.arrayBuffer());
     let binary = "";
     for (let i = 0; i < buf.length; i += 0x8000) binary += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    return `data:image/png;base64,${btoa(binary)}`;
+    return `data:${mime};base64,${btoa(binary)}`;
   } catch {
     return null;
   }
@@ -247,6 +256,17 @@ export async function vehicleToBbmodel(
     });
   }
 
+  // Engine sounds: resolve each slot's event through the pack's sounds.json and embed the ogg, so the
+  // .bbmodel stays the single self-contained vehicle file (the plugin re-ships them in its own RP).
+  let soundsMeta: Record<string, BbSoundMeta> | undefined;
+  for (const [slot, s] of Object.entries(def.sounds ?? {})) {
+    const url = resolveSound(pack, s.sound);
+    const data = url ? await fetchAsDataUrl(url, "audio/ogg") : null;
+    if (!data) warnings.push(`Sound "${slot}" (${s.sound}) couldn't be resolved from the pack — not embedded.`);
+    soundsMeta = soundsMeta ?? {};
+    soundsMeta[slot] = { ...s, data: data ?? undefined };
+  }
+
   const meta: VehiclesPlusMeta = {
     schemaVersion: 1,
     id: def.id,
@@ -255,6 +275,7 @@ export async function vehicleToBbmodel(
     physics: def.physics,
     parts: partsMeta,
     seats: (def.seats ?? []).map((s) => ({ id: s.id, offset: s.offset, driver: !!s.driver })),
+    sounds: soundsMeta,
   };
 
   const bbmodel: Record<string, unknown> = {

@@ -176,5 +176,9 @@ export function loadBbmodel(json: string | object): LoadedBbmodel {
     seats,
   };
 
-  return { definition, pack: { models, items: new Map(), textures }, groups };
+  return {
+    definition,
+    pack: { models, items: new Map(), textures, soundEvents: new Map(), sounds: new Map() },
+    groups,
+  };
 }

@@ -164,11 +164,32 @@ function toCube(el: McElement, textureIndexFor: (ref: string) => number): Record
   };
 }
 
+/**
+ * V3 offsets are authored relative to the VISIBLE vehicle, but some body models (helicopter, tank)
+ * carry a ~180° yaw in their head display — V3 rendered their body flipped. Rotate every part/seat
+ * offset by that flip so rotor/turret/seats land on the same end of the body as they did in V3.
+ */
+function offsetsAlignedToBody(def: VehicleDefinition, pack: ResourcePack): VehicleDefinition {
+  const skin = def.parts.find((p) => p.kind === "skin") ?? def.parts[0];
+  if (!skin) return def;
+  const modelId = skin.itemModel ?? resolveModelId(pack, skin.baseMaterial, skin.customModelData);
+  const model = modelId ? resolveModel(pack, modelId) : null;
+  const ry = ((((model?.display?.rotation?.[1] ?? 0) % 360) + 360) % 360);
+  if (Math.abs(ry - 180) > 45) return def; // only the ±180 body flip needs compensating
+  const flip = (o: Vec3): Vec3 => [-o[0], o[1], -o[2]];
+  return {
+    ...def,
+    parts: def.parts.map((p) => ({ ...p, offset: flip(p.offset) })),
+    seats: (def.seats ?? []).map((s) => ({ ...s, offset: flip(s.offset) })),
+  };
+}
+
 /** Convert a (V3-converted) vehicle definition + resource pack into a BlockBench `.bbmodel` project. */
 export async function vehicleToBbmodel(
-  def: VehicleDefinition,
+  sourceDef: VehicleDefinition,
   pack: ResourcePack,
 ): Promise<{ bbmodel: Record<string, unknown>; warnings: string[] }> {
+  const def = offsetsAlignedToBody(sourceDef, pack);
   const warnings: string[] = [];
   const elements: Record<string, unknown>[] = [];
   const outliner: unknown[] = [];

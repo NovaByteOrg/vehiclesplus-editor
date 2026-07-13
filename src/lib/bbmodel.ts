@@ -165,11 +165,14 @@ function toCube(el: McElement, textureIndexFor: (ref: string) => number): Record
 }
 
 /**
- * V3 offsets are authored relative to the VISIBLE vehicle, but some body models (helicopter, tank)
- * carry a ~180° yaw in their head display — V3 rendered their body flipped. Rotate every part/seat
- * offset by that flip so rotor/turret/seats land on the same end of the body as they did in V3.
+ * Some body models (helicopter, tank) carry a ~180° yaw in their head display — authored backwards
+ * and flipped at render time — which leaves the assembled vehicle's NOSE pointing away from the V4
+ * drive direction (+Z). Rotate the WHOLE assembly 180° about the vehicle origin: every part's offset
+ * flipped AND its yaw turned half a round, plus the seat offsets. This preserves V3's internal layout
+ * exactly (V3 never flipped offsets — see V3's ArmorStandBuilder/LocationUtil) while making the
+ * vehicle face its heading. An offsets-only flip would scramble parts relative to the body.
  */
-function offsetsAlignedToBody(def: VehicleDefinition, pack: ResourcePack): VehicleDefinition {
+function alignedToHeading(def: VehicleDefinition, pack: ResourcePack): VehicleDefinition {
   const skin = def.parts.find((p) => p.kind === "skin") ?? def.parts[0];
   if (!skin) return def;
   const modelId = skin.itemModel ?? resolveModelId(pack, skin.baseMaterial, skin.customModelData);
@@ -179,7 +182,10 @@ function offsetsAlignedToBody(def: VehicleDefinition, pack: ResourcePack): Vehic
   const flip = (o: Vec3): Vec3 => [-o[0], o[1], -o[2]];
   return {
     ...def,
-    parts: def.parts.map((p) => ({ ...p, offset: flip(p.offset) })),
+    parts: def.parts.map((p) => {
+      const rot = p.rotation ?? [0, 0, 0];
+      return { ...p, offset: flip(p.offset), rotation: [rot[0], rot[1] + 180, rot[2]] as Vec3 };
+    }),
     seats: (def.seats ?? []).map((s) => ({ ...s, offset: flip(s.offset) })),
   };
 }
@@ -189,7 +195,7 @@ export async function vehicleToBbmodel(
   sourceDef: VehicleDefinition,
   pack: ResourcePack,
 ): Promise<{ bbmodel: Record<string, unknown>; warnings: string[] }> {
-  const def = offsetsAlignedToBody(sourceDef, pack);
+  const def = alignedToHeading(sourceDef, pack);
   const warnings: string[] = [];
   const elements: Record<string, unknown>[] = [];
   const outliner: unknown[] = [];

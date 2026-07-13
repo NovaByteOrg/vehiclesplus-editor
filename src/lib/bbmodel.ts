@@ -1,32 +1,76 @@
 /**
- * Converts a converted V3 vehicle (its resolved Minecraft part models + the V3 head/display transform)
- * into a single **BlockBench `.bbmodel`** project — one file per vehicle, each part an outliner group,
- * with the armour-stand head transform (display.head · 0.625 · centre) baked into the geometry so the
- * `.bbmodel` looks exactly like the V3 vehicle. This is the editable source for a future BlockBench
- * vehicle addon. Textures are embedded as base64.
+ * Builds one BlockBench `.bbmodel` per converted V3 vehicle — the **authoritative V4 vehicle format**.
  *
- * Math: the part render matrix `M = partModelMatrix(display)` has exactly one rotation, the
- * `display.head` rotation `R_d`. We factor it out — `bake = R_d⁻¹·M` is a pure scale+translate — and
- * bake THAT into each element box (boxes stay boxes, element rotations + faces untouched). `R_d` and
- * the part's yaw go on the part's outliner group instead. Exact for translate / scale / 90°-multiple
- * head rotations (what real VehiclesPlus models use); a non-uniform head scale on a rotated element
- * shears slightly (rare, noted).
+ * The `.bbmodel` carries UNBAKED, original per-part geometry (each part is an outliner group; element
+ * coords are the raw resolved-model coords, so every element stays a valid Minecraft cube within the
+ * `[-16,32]` limit) plus a custom **`vehiclesplus`** metadata object that holds the vehicle definition:
+ * the exact render {@link PartTransform} per part, seats, physics, id/name/type. Plain BlockBench shows
+ * the parts un-assembled (their geometry overlaps at the origin); a future BlockBench addon — and the
+ * V4 plugin — read the metadata and apply each part's transform to assemble + render the vehicle.
+ * Textures are embedded as base64.
+ *
+ * The per-part transform is the full render matrix
+ *   `C = Translate(offset) · Rotate(yaw) · partModelMatrix(display)`
+ * (the head/display/0.625 transform the editor renders V3 with) decomposed into a Bukkit
+ * Transformation. Since a V3 head transform's linear part is rotation·(diagonal scale), `rightRotation`
+ * comes out identity — but we emit the full 4-part transform so the plugin applies it exactly to the
+ * raw model geometry (which, being unbaked, is the same geometry the runtime resource pack ships).
  */
 
 import * as THREE from "three";
 import { partModelMatrix } from "./mc-model";
-import { resolveModel, resolveModelId, resolveTexture, type McElement, type ResourcePack } from "./resourcepack";
-import type { PartDef, VehicleDefinition } from "./vehicle";
+import {
+  resolveModel,
+  resolveModelId,
+  resolveTexture,
+  resolveTextureRef,
+  type McDisplay,
+  type McElement,
+  type ResourcePack,
+} from "./resourcepack";
+import type { PartTransform, Vec3, VehicleDefinition, VehiclePhysics } from "./vehicle";
 
 const DEG = Math.PI / 180;
 const AXIS_INDEX = { x: 0, y: 1, z: 2 } as const;
 const FACES = ["north", "east", "south", "west", "up", "down"] as const;
 
+/** One part's entry in the `.bbmodel`'s `vehiclesplus.parts` metadata. */
+export interface BbPartMeta {
+  id: string;
+  /** The outliner group (by name) whose child elements are this part's geometry. */
+  group: string;
+  /** Full render Transformation (supersedes any offset/rotation/scale). */
+  transform: PartTransform;
+  colorable: boolean;
+  /** Default paint/tint colour (RGB 0-255) applied to the model's tintindex faces. */
+  color?: [number, number, number];
+}
+
+export interface BbSeatMeta {
+  id: string;
+  offset: Vec3;
+  driver: boolean;
+}
+
+/** The custom `vehiclesplus` object embedded in the `.bbmodel` — the whole vehicle definition. */
+export interface VehiclesPlusMeta {
+  schemaVersion: number;
+  id: string;
+  name: string;
+  type: string;
+  physics?: VehiclePhysics;
+  parts: BbPartMeta[];
+  seats: BbSeatMeta[];
+}
+
 interface BbTexture {
   id: string;
   name: string;
   uuid: string;
-  source: string; // data:image/png;base64,...
+  source: string; // data:image/png;base64,... (an object URL until embedded)
+  /** The resolved texture id (e.g. "minecraft:block/black_concrete") — vanilla ones are referenced
+   *  directly at runtime instead of embedding a fragile copy. */
+  refId?: string;
 }
 
 /** Fetch a resolved texture URL and base64-encode it as a `.bbmodel` data-URL source. */
@@ -43,50 +87,42 @@ async function fetchAsDataUrl(url: string): Promise<string | null> {
   }
 }
 
-/** Apply a pure scale+translate matrix to a point (model units). */
-function applyVec(m: THREE.Matrix4, x: number, y: number, z: number): [number, number, number] {
-  const v = new THREE.Vector3(x, y, z).applyMatrix4(m);
-  return [v.x, v.y, v.z];
-}
-
-/** Euler (degrees) for a part group = the part's yaw composed with the model's display.head rotation. */
-function groupRotation(yawDeg: number, headRotation?: [number, number, number]): [number, number, number] {
-  // Common case (yaw + a Y-only head rotation, e.g. the tank's 180°): keep it a clean single-axis euler.
-  if (!headRotation || (headRotation[0] === 0 && headRotation[2] === 0)) {
-    return [0, yawDeg + (headRotation?.[1] ?? 0), 0];
-  }
-  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, yawDeg * DEG, 0));
-  q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(headRotation[0] * DEG, headRotation[1] * DEG, headRotation[2] * DEG)));
-  const e = new THREE.Euler().setFromQuaternion(q);
-  return [e.x / DEG, e.y / DEG, e.z / DEG];
-}
-
 /**
- * Bake one element through `bakeModel` (scale+translate, model units) + `worldOffset` (the part's V4
- * position ×16), keeping its own rotation + faces. Returns a `.bbmodel` cube.
+ * The full render Transformation for a part = `Translate(offset) · Rotate(yaw) · partModelMatrix(display)`
+ * decomposed. `rightRotation` is identity for V3 head transforms (linear part is rotation·diagonal-scale).
  */
-function bakeElement(
-  el: McElement,
-  bakeModel: THREE.Matrix4,
-  worldOffset: [number, number, number],
-  textureIndexFor: (ref: string) => number,
-): Record<string, unknown> {
-  // Transform the two box corners; min/max gives the (still axis-aligned) baked box.
-  const c0 = applyVec(bakeModel, el.from[0], el.from[1], el.from[2]);
-  const c1 = applyVec(bakeModel, el.to[0], el.to[1], el.to[2]);
-  const from: [number, number, number] = [0, 0, 0];
-  const to: [number, number, number] = [0, 0, 0];
-  for (let i = 0; i < 3; i++) {
-    from[i] = Math.min(c0[i], c1[i]) + worldOffset[i];
-    to[i] = Math.max(c0[i], c1[i]) + worldOffset[i];
-  }
+function partTransform(offset: Vec3, rotationDeg: Vec3, display?: McDisplay): PartTransform {
+  const C = new THREE.Matrix4()
+    .makeTranslation(offset[0], offset[1], offset[2])
+    .multiply(
+      new THREE.Matrix4().makeRotationFromEuler(
+        new THREE.Euler(rotationDeg[0] * DEG, rotationDeg[1] * DEG, rotationDeg[2] * DEG),
+      ),
+    )
+    .multiply(partModelMatrix(display));
+
+  const t = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const s = new THREE.Vector3();
+  C.decompose(t, q, s);
+  return {
+    translation: [t.x, t.y, t.z],
+    leftRotation: [q.x, q.y, q.z, q.w],
+    scale: [s.x, s.y, s.z],
+    rightRotation: [0, 0, 0, 1],
+  };
+}
+
+/** A resolved Minecraft element → a `.bbmodel` cube, UNBAKED (raw coords, own rotation + faces kept). */
+function toCube(el: McElement, textureIndexFor: (ref: string) => number): Record<string, unknown> {
+  const from = [el.from[0], el.from[1], el.from[2]] as [number, number, number];
+  const to = [el.to[0], el.to[1], el.to[2]] as [number, number, number];
 
   const rotation: [number, number, number] = [0, 0, 0];
   let origin: [number, number, number] = [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2];
   if (el.rotation) {
     rotation[AXIS_INDEX[el.rotation.axis]] = el.rotation.angle;
-    const o = applyVec(bakeModel, el.rotation.origin[0], el.rotation.origin[1], el.rotation.origin[2]);
-    origin = [o[0] + worldOffset[0], o[1] + worldOffset[1], o[2] + worldOffset[2]];
+    origin = [el.rotation.origin[0], el.rotation.origin[1], el.rotation.origin[2]];
   }
 
   const faces: Record<string, unknown> = {};
@@ -97,6 +133,7 @@ function bakeElement(
       uv: f.uv ?? [0, 0, 16, 16],
       texture: textureIndexFor(f.texture),
       rotation: f.rotation ?? 0,
+      tint: f.tintindex != null ? f.tintindex : -1, // preserve tintindex for colourable parts
     };
   }
 
@@ -127,9 +164,10 @@ export async function vehicleToBbmodel(
   const elements: Record<string, unknown>[] = [];
   const outliner: unknown[] = [];
 
-  // Gather + embed textures once per vehicle; map a model's texture ref -> bbmodel texture index.
+  // Gather + embed textures once per vehicle; map a model's resolved texture URL -> bbmodel index.
   const textures: BbTexture[] = [];
   const urlToIndex = new Map<string, number>();
+  const partsMeta: BbPartMeta[] = [];
 
   for (const part of def.parts) {
     const modelId = part.itemModel ?? resolveModelId(pack, part.baseMaterial, part.customModelData);
@@ -139,23 +177,7 @@ export async function vehicleToBbmodel(
       continue;
     }
 
-    const M = partModelMatrix(model.display); // block units (includes R_d, 0.625, centre)
-    const headRotation = model.display?.rotation;
-    // bake = R_d⁻¹ · M  → pure scale+translate; then ×16 for model units (translations scale by 16).
-    const rdInv = new THREE.Matrix4();
-    if (headRotation) {
-      const e = new THREE.Euler(headRotation[0] * DEG, headRotation[1] * DEG, headRotation[2] * DEG);
-      rdInv.makeRotationFromEuler(e).invert();
-    }
-    const bakeModel = new THREE.Matrix4()
-      .makeScale(16, 16, 16)
-      .multiply(rdInv)
-      .multiply(M)
-      .multiply(new THREE.Matrix4().makeScale(1 / 16, 1 / 16, 1 / 16));
-
-    const worldOffset: [number, number, number] = [part.offset[0] * 16, part.offset[1] * 16, part.offset[2] * 16];
-
-    // Resolve this part's textures into the shared, embedded set.
+    // Resolve this part's #refs into the shared, embedded texture set.
     const refToIndex = new Map<string, number>();
     const textureIndexFor = (ref: string): number => {
       if (refToIndex.has(ref)) return refToIndex.get(ref)!;
@@ -168,24 +190,25 @@ export async function vehicleToBbmodel(
       if (idx == null) {
         idx = textures.length;
         urlToIndex.set(url, idx);
-        textures.push({ id: String(idx), name: `tex_${idx}.png`, uuid: crypto.randomUUID(), source: url }); // source replaced with data-URL below
+        const rawId = resolveTextureRef(model.textures, ref);
+        const refId = rawId ? (rawId.includes(":") ? rawId : `minecraft:${rawId}`) : undefined;
+        textures.push({ id: String(idx), name: `tex_${idx}.png`, uuid: crypto.randomUUID(), source: url, refId });
       }
       refToIndex.set(ref, idx);
       return idx;
     };
 
-    const partUuids: string[] = [];
+    const childUuids: string[] = [];
     for (const el of model.elements) {
-      const cube = bakeElement(el, bakeModel, worldOffset, textureIndexFor);
+      const cube = toCube(el, textureIndexFor);
       elements.push(cube);
-      partUuids.push(cube.uuid as string);
+      childUuids.push(cube.uuid as string);
     }
 
-    const [yaw] = [part.rotation?.[1] ?? 0];
     outliner.push({
       name: part.id,
-      origin: worldOffset,
-      rotation: groupRotation(yaw, headRotation),
+      origin: [0, 0, 0],
+      rotation: [0, 0, 0],
       uuid: crypto.randomUUID(),
       export: true,
       isOpen: false,
@@ -193,12 +216,16 @@ export async function vehicleToBbmodel(
       visibility: true,
       autouv: 0,
       color: 0,
-      children: partUuids,
+      children: childUuids,
     });
 
-    if (headRotation && model.display?.scale && new Set(model.display.scale).size > 1) {
-      warnings.push(`Part "${part.id}" has a rotated + non-uniform display.head — slight shear possible.`);
-    }
+    partsMeta.push({
+      id: part.id,
+      group: part.id,
+      transform: part.transform ?? partTransform(part.offset, part.rotation ?? [0, 0, 0], model.display),
+      colorable: !!part.colorable,
+      color: part.color,
+    });
   }
 
   // Replace each texture's source URL with its embedded base64 (fetched in parallel).
@@ -210,7 +237,7 @@ export async function vehicleToBbmodel(
     }),
   );
 
-  // Seats become BlockBench locators (handy for the future addon; ignored by plain BlockBench export).
+  // Seats become BlockBench locators (handy for the future addon; also mirrored in the metadata).
   for (const seat of def.seats ?? []) {
     outliner.push({
       name: seat.driver ? `seat_driver_${seat.id}` : `seat_${seat.id}`,
@@ -219,6 +246,16 @@ export async function vehicleToBbmodel(
       position: [seat.offset[0] * 16, seat.offset[1] * 16, seat.offset[2] * 16],
     });
   }
+
+  const meta: VehiclesPlusMeta = {
+    schemaVersion: 1,
+    id: def.id,
+    name: def.name || def.id,
+    type: def.type,
+    physics: def.physics,
+    parts: partsMeta,
+    seats: (def.seats ?? []).map((s) => ({ id: s.id, offset: s.offset, driver: !!s.driver })),
+  };
 
   const bbmodel: Record<string, unknown> = {
     meta: { format_version: "4.5", model_format: "java_block", box_uv: false },
@@ -246,7 +283,11 @@ export async function vehicleToBbmodel(
       uuid: t.uuid,
       relative_path: "",
       source: t.source,
+      // VehiclesPlus: the resolved texture id, so the plugin can reference vanilla textures directly.
+      vp_ref: t.refId,
     })),
+    // The V4 vehicle definition, embedded — makes the .bbmodel the authoritative vehicle format.
+    vehiclesplus: meta,
   };
 
   return { bbmodel, warnings };

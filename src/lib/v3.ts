@@ -22,10 +22,12 @@ interface V3Item {
   color?: { red?: number; green?: number; blue?: number };
 }
 
-/** A rim design's item (material + CMD), keyed by rimDesignId, for resolving wheel models. */
+/** A rim design's item (material + CMD + dye colour), keyed by rimDesignId, for resolving wheel models. */
 export interface RimItem {
   material?: string;
   customModelData?: number;
+  /** The rim's leather dye colour (RGB 0-255) — tints the wheel model's tintindex faces. */
+  color?: [number, number, number];
 }
 
 interface V3Part {
@@ -96,12 +98,12 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     const y = part.yoffset ?? part.yOffset ?? 0;
     const rawZ = part.zoffset ?? part.zOffset ?? 0;
     const rotation = num(part.rotationOffset);
-    // V3 part offsets live in a frame that is a reflected 90° turn from the model frame: the vehicle
-    // models have their length along Z, but the config puts front/back along X *and* its side axis is
-    // mirrored relative to the model. Map (x,z) -> (-z,-x): config front (+x) -> body front (-z), and
-    // config side (+z) -> body left (-x). Only anchor positions move; part models keep orientation.
+    // V3 part offsets live in a frame turned 90° from the model frame: the vehicle models have their
+    // length along Z, but the config puts front/back along X. Map (x,z) -> (-z, x): config front (+x)
+    // -> body front (+z, the ItemDisplay model's front), config side (+z) -> body left (-x). Only anchor
+    // positions move; part models keep their own orientation.
     const x = -rawZ;
-    const z = -rawX;
+    const z = rawX;
 
     if (SEAT_TYPES.has(type)) {
       // A rider mounted on the seat's (armor-stand) anchor sits ~height×0.75 ≈ 1.48 above it — close
@@ -117,17 +119,21 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
 
     if (type === "wheel") {
       // V3 wheels get their model from a rim design (its skin item is a HEAD item, like other parts).
+      // The V3 rotationOffset was tuned for the armour-stand rendering; on a V4 ItemDisplay the wheel
+      // comes out rotated 180° (rims/tread mirrored front-to-back + left-to-right), so add half a turn.
       const rim = rims?.get(part.rimDesignId ?? "");
+      const wheelYaw = rotation + 180;
       if (rim?.material) {
         parts.push({
           id: `wheel_${index}`,
           kind: "wheel",
           offset: [x, y + HEAD_Y_OFFSET, z],
-          rotation: [0, rotation, 0],
+          rotation: [0, wheelYaw, 0],
           scale: [HEAD_SCALE, HEAD_SCALE, HEAD_SCALE],
           baseMaterial: rim.material,
           customModelData: rim.customModelData,
           colorable: false,
+          color: rim.color, // the rim's dye colour tints the wheel's tintindex faces
           sourceIndex: index,
         });
       } else {
@@ -136,7 +142,7 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
           id: `wheel_${index}`,
           kind: "wheel",
           offset: [x, y + HEAD_Y_OFFSET, z],
-          rotation: [0, rotation, 0],
+          rotation: [0, wheelYaw, 0],
           scale: [0.25, 0.6, 0.6],
           baseMaterial: "COAL_BLOCK",
           colorable: false,

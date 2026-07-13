@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Hjson from "hjson";
 import { loadResourcePack } from "@/lib/resourcepack";
 import { convertV3ToV4, type ConvertResult } from "@/lib/convert-v4";
+import { loadBbmodel } from "@/lib/bbmodel-load";
+import VehicleViewer from "@/components/VehicleViewer";
 import type { RimItem } from "@/lib/v3";
 
 /** Parse rim HJSON texts into the rimDesignId → skin-item map the converter needs for wheels. */
@@ -11,8 +13,18 @@ function parseRims(texts: string[]): Map<string, RimItem> {
   const rims = new Map<string, RimItem>();
   for (const text of texts) {
     try {
-      const r = Hjson.parse(text) as { name?: string; skin?: { material?: string; custommodeldata?: number } };
-      if (r.name) rims.set(r.name, { material: r.skin?.material, customModelData: r.skin?.custommodeldata });
+      const r = Hjson.parse(text) as {
+        name?: string;
+        skin?: { material?: string; custommodeldata?: number; color?: { red?: number; green?: number; blue?: number } };
+      };
+      if (r.name) {
+        const c = r.skin?.color;
+        rims.set(r.name, {
+          material: r.skin?.material,
+          customModelData: r.skin?.custommodeldata,
+          color: c ? [c.red ?? 255, c.green ?? 255, c.blue ?? 255] : undefined,
+        });
+      }
     } catch {
       // skip malformed rim
     }
@@ -37,7 +49,20 @@ export default function ConvertPage() {
   const [result, setResult] = useState<ConvertResult | null>(null);
   const [configFiles, setConfigFiles] = useState<File[]>([]);
   const [packFile, setPackFile] = useState<File | null>(null);
+  const [previewId, setPreviewId] = useState<string | null>(null);
   const folderInput = useRef<HTMLInputElement>(null);
+
+  // Render the produced `.bbmodel` straight back through the viewer (reverse of the converter) so you
+  // can confirm it looks right before shipping it to the plugin.
+  const preview = useMemo(() => {
+    if (!result || result.models.length === 0) return null;
+    const chosen = result.models.find((m) => m.id === previewId) ?? result.models[0];
+    try {
+      return loadBbmodel(chosen.bbmodel);
+    } catch {
+      return null;
+    }
+  }, [result, previewId]);
 
   useEffect(() => {
     if (folderInput.current) {
@@ -95,9 +120,13 @@ export default function ConvertPage() {
           Convert V3 → V4 <span className="text-amber-400">(.bbmodel)</span>
         </h1>
         <p className="mt-1 text-sm text-neutral-400">
-          Turns V3 vehicles into V4 <code className="text-neutral-300">.vppack</code> definitions plus an editable
-          BlockBench <code className="text-neutral-300">.bbmodel</code> per vehicle (the V3 head transform baked in, so
-          it looks identical). Downloads a zip.
+          Turns each V3 vehicle into one editable BlockBench{" "}
+          <code className="text-neutral-300">.bbmodel</code> — the V4 vehicle format. It holds the raw part
+          geometry plus the vehicle definition (transforms, seats, physics) in a{" "}
+          <code className="text-neutral-300">vehiclesplus</code> block. Drop the{" "}
+          <code className="text-neutral-300">.bbmodel</code>s into{" "}
+          <code className="text-neutral-300">plugins/VehiclesPlus/packs/</code> — the plugin reads them and builds
+          the resource pack. Downloads a zip.
         </p>
       </div>
 
@@ -158,8 +187,7 @@ export default function ConvertPage() {
                 <th className="py-1">Vehicle</th>
                 <th>Parts</th>
                 <th>.bbmodel elements</th>
-                <th>RP models</th>
-                <th>RP textures</th>
+                <th>Textures</th>
               </tr>
             </thead>
             <tbody className="text-neutral-300">
@@ -168,17 +196,41 @@ export default function ConvertPage() {
                   <td className="py-1 font-medium">{v.id}</td>
                   <td>{v.parts}</td>
                   <td>{v.elements}</td>
-                  <td>{v.rpModels}</td>
-                  <td>{v.rpTextures}</td>
+                  <td>{v.textures}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <p className="mt-2 text-[11px] text-neutral-500">
-            The zip contains <code>definitions/</code> (V4 <code>.vppack</code>), <code>models/</code> (editable
-            <code> .bbmodel</code>), and <code>resourcepack/</code> — install the resource pack, then apply the
-            definitions in-game to see the vehicles render.
+            The zip contains one <code>.bbmodel</code> per vehicle (open them in BlockBench, or drop them into{" "}
+            <code>plugins/VehiclesPlus/packs/</code>). The plugin reads each <code>.bbmodel</code> and writes{" "}
+            <code>resourcepack.zip</code> on start — install that to see the vehicles render.
           </p>
+
+          {preview && (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-neutral-400">Preview (rendered from the .bbmodel)</span>
+                {result.models.length > 1 && (
+                  <select
+                    value={previewId ?? result.models[0].id}
+                    onChange={(e) => setPreviewId(e.target.value)}
+                    className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200"
+                  >
+                    {result.models.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.id}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="h-80 overflow-hidden rounded-lg border border-neutral-800">
+                <VehicleViewer definition={preview.definition} pack={preview.pack} />
+              </div>
+            </div>
+          )}
+
           {result.warnings.length > 0 && (
             <details className="mt-3">
               <summary className="cursor-pointer text-xs text-amber-400">{result.warnings.length} warning(s)</summary>

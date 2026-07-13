@@ -170,10 +170,14 @@ function buildFlatModel(model: ResolvedModel, pack: ResourcePack): THREE.Object3
 }
 
 /**
- * The exact transform `buildModelObject` applies on top of a part's element geometry (block units):
- * `Scale(0.625) · Translate(display.head.t/16) · Rotate(display.head.r) · Scale(display.head.s) · Translate(-0.5)`.
- * Exposed so the V3→V4 converter can BAKE this same head/display/0.625 transform into the exported
- * `.bbmodel` geometry (keep these two in sync — both encode how a V3 head item is rendered).
+ * The head/display transform applied on top of a part's element geometry (block units):
+ * `Scale(0.625) · Translate(display.head.t/16) · Rotate(display.head.r) · Scale(display.head.s)`.
+ *
+ * Note the **−0.5 centring is NOT included here** — it's the *renderer's* job. Minecraft's ItemRenderer
+ * translates a model by −0.5 when an ItemDisplay draws it, so the converted part `transform` must be
+ * centring-free (else the ItemDisplay double-centres, which — inside each wheel's yaw — throws the
+ * wheels off their corners). Renderers that don't auto-centre (the editor's transform-part path) apply
+ * the −0.5 themselves. Exposed so the V3→V4 converter derives the exact Bukkit Transformation.
  */
 export function partModelMatrix(display?: McDisplay): THREE.Matrix4 {
   const m = new THREE.Matrix4().makeScale(HEAD_ITEM_SCALE, HEAD_ITEM_SCALE, HEAD_ITEM_SCALE);
@@ -189,10 +193,15 @@ export function partModelMatrix(display?: McDisplay): THREE.Matrix4 {
       m.multiply(new THREE.Matrix4().makeScale(display.scale[0], display.scale[1], display.scale[2]));
     }
   }
-  return m.multiply(new THREE.Matrix4().makeTranslation(-0.5, -0.5, -0.5));
+  return m;
 }
 
-export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?: THREE.Color): THREE.Object3D {
+export function buildModelObject(
+  model: ResolvedModel,
+  pack: ResourcePack,
+  tint?: THREE.Color,
+  opts?: { headTransform?: boolean },
+): THREE.Object3D {
   let root: THREE.Group;
   if (model.elements.length === 0) {
     root = new THREE.Group();
@@ -200,6 +209,14 @@ export function buildModelObject(model: ResolvedModel, pack: ResourcePack, tint?
     if (flat) root.add(flat);
   } else {
     root = collectGeometry(model, pack, tint);
+  }
+
+  // Raw mode (converted `.bbmodel` parts): the caller applies the part's centring-free render
+  // `Transformation` as the group matrix. We still centre the geometry by −0.5 here — mirroring what
+  // Minecraft's ItemRenderer does for an ItemDisplay — so the editor preview matches the in-game render.
+  if (opts?.headTransform === false) {
+    root.position.set(-0.5, -0.5, -0.5);
+    return root;
   }
 
   // Minecraft renders a head item as `display.head` applied to the centred model:
@@ -246,5 +263,7 @@ export function buildPartModel(
   const tint = rgb
     ? new THREE.Color().setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace)
     : undefined;
-  return buildModelObject(model, pack, tint);
+  // Converted parts carry a full render transform (applied by the viewer as the group matrix), so their
+  // model must be raw block-unit geometry — otherwise the head transform is applied twice.
+  return buildModelObject(model, pack, tint, { headTransform: !part.transform });
 }

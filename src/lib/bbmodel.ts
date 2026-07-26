@@ -98,7 +98,13 @@ async function fetchAsDataUrl(url: string, mime = "image/png"): Promise<string |
 
 /**
  * The full render Transformation for a part = `Translate(offset) · Rotate(yaw) · partModelMatrix(display)`
- * decomposed. `rightRotation` is identity for V3 head transforms (linear part is rotation·diagonal-scale).
+ * decomposed.
+ *
+ * `rightRotation` is a 180° Y rotation on every part: vanilla renders the item model inside an
+ * ItemDisplay flipped 180° about its centre (the item-frame quirk), INSIDE the part's transform — so
+ * an off-centre part (the heli body, anchored 2.1 blocks from its geometry centre) shifts blocks away
+ * from its seats if left uncancelled. The innermost rotation slot cancels it exactly, making the
+ * rendered vehicle equal the data.
  */
 function partTransform(offset: Vec3, rotationDeg: Vec3, display?: McDisplay): PartTransform {
   const C = new THREE.Matrix4()
@@ -118,7 +124,7 @@ function partTransform(offset: Vec3, rotationDeg: Vec3, display?: McDisplay): Pa
     translation: [t.x, t.y, t.z],
     leftRotation: [q.x, q.y, q.z, q.w],
     scale: [s.x, s.y, s.z],
-    rightRotation: [0, 0, 0, 1],
+    rightRotation: [0, 1, 0, 0], // cancels the client's 180° fixed-context item flip
   };
 }
 
@@ -161,32 +167,6 @@ function toCube(el: McElement, textureIndexFor: (ref: string) => number): Record
     faces,
     type: "cube",
     uuid: crypto.randomUUID(),
-  };
-}
-
-/**
- * Some body models (helicopter, tank) carry a ~180° yaw in their head display — authored backwards
- * and flipped at render time — which leaves the assembled vehicle's NOSE pointing away from the V4
- * drive direction (+Z). Rotate the WHOLE assembly 180° about the vehicle origin: every part's offset
- * flipped AND its yaw turned half a round, plus the seat offsets. This preserves V3's internal layout
- * exactly (V3 never flipped offsets — see V3's ArmorStandBuilder/LocationUtil) while making the
- * vehicle face its heading. An offsets-only flip would scramble parts relative to the body.
- */
-function alignedToHeading(def: VehicleDefinition, pack: ResourcePack): VehicleDefinition {
-  const skin = def.parts.find((p) => p.kind === "skin") ?? def.parts[0];
-  if (!skin) return def;
-  const modelId = skin.itemModel ?? resolveModelId(pack, skin.baseMaterial, skin.customModelData);
-  const model = modelId ? resolveModel(pack, modelId) : null;
-  const ry = ((((model?.display?.rotation?.[1] ?? 0) % 360) + 360) % 360);
-  if (Math.abs(ry - 180) > 45) return def; // only the ±180 body flip needs compensating
-  const flip = (o: Vec3): Vec3 => [-o[0], o[1], -o[2]];
-  return {
-    ...def,
-    parts: def.parts.map((p) => {
-      const rot = p.rotation ?? [0, 0, 0];
-      return { ...p, offset: flip(p.offset), rotation: [rot[0], rot[1] + 180, rot[2]] as Vec3 };
-    }),
-    seats: (def.seats ?? []).map((s) => ({ ...s, offset: flip(s.offset) })),
   };
 }
 
@@ -271,10 +251,9 @@ function adjustRotorClearance(
 
 /** Convert a (V3-converted) vehicle definition + resource pack into a BlockBench `.bbmodel` project. */
 export async function vehicleToBbmodel(
-  sourceDef: VehicleDefinition,
+  def: VehicleDefinition,
   pack: ResourcePack,
 ): Promise<{ bbmodel: Record<string, unknown>; warnings: string[] }> {
-  const def = alignedToHeading(sourceDef, pack);
   const warnings: string[] = [];
   const elements: Record<string, unknown>[] = [];
   const outliner: unknown[] = [];

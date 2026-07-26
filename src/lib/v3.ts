@@ -127,10 +127,10 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
 
     if (type === "wheel") {
       // V3 wheels get their model from a rim design (its skin item is a HEAD item, like other parts).
-      // The V3 rotationOffset was tuned for the armour-stand rendering; on a V4 ItemDisplay the wheel
-      // comes out rotated 180° (rims/tread mirrored front-to-back + left-to-right), so add half a turn.
+      // Wheels keep their authored yaw as-is: the converter cancels the client's 180° item flip via
+      // rightRotation, so no per-part compensation is needed here (the old +180 was compensating it).
       const rim = rims?.get(part.rimDesignId ?? "");
-      const wheelYaw = rotation + 180;
+      const wheelYaw = rotation;
       if (rim?.material) {
         parts.push({
           id: `wheel_${index}`,
@@ -168,7 +168,9 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
         id: `${type || "part"}_${index}`,
         kind: type || "part",
         offset,
-        rotation: [0, rotation, 0],
+        // +180: these models are authored facing backwards (V3's renderer flipped them; the V4
+        // converter cancels that flip, so the turn-around is stated explicitly in the data instead).
+        rotation: [0, rotation + 180, 0],
         scale,
         baseMaterial: part.item.material,
         customModelData: part.item.custommodeldata,

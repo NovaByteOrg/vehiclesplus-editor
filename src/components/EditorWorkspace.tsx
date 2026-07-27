@@ -138,6 +138,33 @@ export default function EditorWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
 
+  // Live sync: in a server session, debounce-push edits to the session's live channel — the plugin
+  // (when started with /vp editor live) polls it and applies changes in-game automatically. Best
+  // effort: a failed push changes nothing, and the "Send to server" paste-code flow still works.
+  const livePushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => {
+    if (!session || !dirty) return;
+    clearTimeout(livePushTimer.current);
+    livePushTimer.current = setTimeout(() => {
+      const vehicles: unknown[] = [];
+      for (const e of entries) {
+        if (e.category !== "vehicle" || e.format !== "v4") continue;
+        try {
+          vehicles.push(JSON.parse(e.text));
+        } catch {
+          // mid-edit invalid JSON — push the rest, this one goes out on the next debounce
+        }
+      }
+      if (vehicles.length === 0) return;
+      fetch(`/api/session?code=${encodeURIComponent(session)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ vehicles }),
+      }).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(livePushTimer.current);
+  }, [entries, session, dirty]);
+
   // Push the edited V4 definitions back to the session store; the player runs /vp applyedits <code>.
   async function sendToServer() {
     setSending(true);

@@ -12,6 +12,11 @@ import { join } from "node:path";
  * The browser opens `/?session=<code>`, edits, then POSTs the edited definitions to get a new apply
  * code the player runs as `/vp applyedits <code>`.
  *
+ * LIVE SYNC (the `/vp editor live` flow — polling, no websocket needed):
+ *   PUT  ?code=<code> { vehicles: [...] } → { revision }  the browser auto-pushes debounced edits
+ *   GET  ?code=<code>&live=1              → { revision, vehicles } | 404   the plugin polls and
+ *                                           applies whenever the revision advances
+ *
  * LOCAL SCAFFOLD: backed by a temp-dir file store (durable across dev restarts, single-host only).
  * To go multi-host/hosted, swap ONLY {@link putSession}/{@link getSession} for a KV (Upstash/Vercel KV).
  */
@@ -44,6 +49,25 @@ async function getSession(code: string): Promise<string | null> {
   if (!/^[a-z0-9]{1,32}$/.test(code)) return null; // guard against path traversal
   try {
     const file = join(STORE_DIR, `${code}.json`);
+    const info = await stat(file);
+    if (Date.now() - info.mtimeMs > TTL_MS) return null;
+    return await readFile(file, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function putLive(code: string, payload: string): Promise<boolean> {
+  if (!/^[a-z0-9]{1,32}$/.test(code)) return false;
+  await mkdir(STORE_DIR, { recursive: true });
+  await writeFile(join(STORE_DIR, `${code}.live.json`), payload, "utf8");
+  return true;
+}
+
+async function getLive(code: string): Promise<string | null> {
+  if (!/^[a-z0-9]{1,32}$/.test(code)) return null;
+  try {
+    const file = join(STORE_DIR, `${code}.live.json`);
     const info = await stat(file);
     if (Date.now() - info.mtimeMs > TTL_MS) return null;
     return await readFile(file, "utf8");
@@ -87,10 +111,44 @@ export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   if (!code) return Response.json({ error: "missing code" }, { status: 400 });
 
+  if (request.nextUrl.searchParams.get("live") === "1") {
+    const live = await getLive(code);
+    if (live == null) return Response.json({ error: "no live edits yet" }, { status: 404 });
+    return new Response(live, {
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
+  }
+
   const payload = await getSession(code);
   if (payload == null) return Response.json({ error: "no such session (expired?)" }, { status: 404 });
 
   return new Response(payload, {
     headers: { "content-type": "application/json", "cache-control": "no-store" },
   });
+}
+
+/** Live-sync push: the browser writes its debounced edits under the session's live channel. */
+export async function PUT(request: NextRequest) {
+  const code = request.nextUrl.searchParams.get("code");
+  if (!code) return Response.json({ error: "missing code" }, { status: 400 });
+  if ((await getSession(code)) == null) {
+    return Response.json({ error: "no such session (expired?)" }, { status: 404 });
+  }
+
+  const raw = await request.text();
+  if (raw.length > MAX_BYTES) return Response.json({ error: "payload too large" }, { status: 413 });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return Response.json({ error: "body must be JSON" }, { status: 400 });
+  }
+  const vehicles = (parsed as { vehicles?: unknown }).vehicles;
+  if (!Array.isArray(vehicles)) {
+    return Response.json({ error: "expected { vehicles: [...] }" }, { status: 400 });
+  }
+
+  const revision = Date.now();
+  await putLive(code, JSON.stringify({ revision, vehicles }));
+  return Response.json({ revision }, { headers: { "cache-control": "no-store" } });
 }

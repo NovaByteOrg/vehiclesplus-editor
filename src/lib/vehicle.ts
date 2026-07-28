@@ -55,6 +55,8 @@ export interface VehiclePhysics {
   acceleration: number;
   turnRate: number;
   mass: number;
+  /** V3's gearbox: realistic boxes shift forward↔reverse through NEUTRAL with a cooldown (ticks). */
+  gearbox?: { realistic: boolean; cooldown: number };
 }
 
 /** One engine-sound slot (V3 `sounds.idle` etc.): the event name + how it's played. */

@@ -65,6 +65,7 @@ export interface V3VehicleModel {
   maxSpeed?: V3Upgradable;
   acceleration?: V3Upgradable;
   turningRadius?: V3Upgradable;
+  gearbox?: { realistic?: boolean; cooldown?: number };
   parts?: V3Part[];
   availableColors?: { red?: number; green?: number; blue?: number }[];
   sounds?: Record<string, V3Sound>;
@@ -195,6 +196,11 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
       acceleration: 0.06,
       turnRate: 4.0,
       mass: 1.0,
+      // V3's gearbox setting carries straight through: realistic boxes shift F->N->R with a cooldown.
+      gearbox: {
+        realistic: model.gearbox?.realistic === true,
+        cooldown: model.gearbox?.cooldown ?? 10,
+      },
     },
     parts,
     seats,

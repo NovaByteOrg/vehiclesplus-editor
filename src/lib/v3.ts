@@ -116,9 +116,12 @@ export function convertV3Model(model: V3VehicleModel, rims?: Map<string, RimItem
     if (SEAT_TYPES.has(type)) {
       // A rider mounted on the seat's (armor-stand) anchor sits ~height×0.75 ≈ 1.48 above it — close
       // enough to the head-item lift — so raise the seat marker by HEAD_Y_OFFSET to match the visible car.
+      // Seats use +rawZ (V3's own side mapping) where parts use -rawZ: the part mapping mirrors the
+      // side axis (Bukkit↔Three.js handedness, invisible on the symmetric geometry), but a seat is a
+      // POSITION — mirroring it puts the driver on the wrong side (right instead of left-front).
       seats.push({
         id: `seat_${seats.length + 1}`,
-        offset: [x, y + HEAD_Y_OFFSET, z],
+        offset: [rawZ, y + HEAD_Y_OFFSET, z],
         driver: part.steer === true,
         sourceIndex: index,
       });

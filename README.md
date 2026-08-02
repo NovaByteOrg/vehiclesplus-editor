@@ -26,11 +26,14 @@ npm run start    # serves the production build on :3000
 
 ## Deploy
 
-- **SaaS (Vercel):** import this repo in Vercel — zero config (it's a standard Next.js app). The
-  owner links the repo to Vercel.
+- **SaaS (Vercel):** import this repo in Vercel (it's a standard Next.js app), then add a Redis
+  store for the session/live-sync channel — serverless invocations don't share memory or `/tmp`,
+  so the hosted deployment needs one. Add the **Upstash Redis** (Vercel Marketplace) integration,
+  or set the env vars by hand: `KV_REST_API_URL` + `KV_REST_API_TOKEN` (Vercel KV names) or
+  `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`. Sessions expire after 1 hour (Redis TTL).
 - **Self-host:** `npm run build && npm run start` behind any reverse proxy, or containerise it
-  (`next build` output runs anywhere Node 18+ runs). The live-sync channel can be hosted in-process
-  for self-host deployments.
+  (`next build` output runs anywhere Node 18+ runs). Without Redis env vars the session store
+  falls back to a temp-dir file store — fine for a single host, which self-hosting usually is.
 
 ## The contract
 

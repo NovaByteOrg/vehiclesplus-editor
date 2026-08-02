@@ -17,8 +17,12 @@ import { join } from "node:path";
  *   GET  ?code=<code>&live=1              → { revision, vehicles } | 404   the plugin polls and
  *                                           applies whenever the revision advances
  *
- * LOCAL SCAFFOLD: backed by a temp-dir file store (durable across dev restarts, single-host only).
- * To go multi-host/hosted, swap ONLY {@link putSession}/{@link getSession} for a KV (Upstash/Vercel KV).
+ * STORAGE: Redis (Upstash / Vercel KV) via its REST API when the environment provides it —
+ * required on the hosted deployment, where each serverless invocation gets its own /tmp — with a
+ * temp-dir file store as the local-dev fallback (durable across dev restarts, single-host only).
+ * Set either the Vercel KV names (KV_REST_API_URL / KV_REST_API_TOKEN) or the Upstash names
+ * (UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN); the Vercel marketplace integration injects
+ * them automatically.
  */
 
 export const runtime = "nodejs";
@@ -26,6 +30,7 @@ export const dynamic = "force-dynamic";
 
 const STORE_DIR = join(tmpdir(), "vp-editor-sessions");
 const TTL_MS = 60 * 60 * 1000; // sessions expire after 1 hour
+const TTL_SECONDS = TTL_MS / 1000;
 const MAX_BYTES = 5 * 1024 * 1024; // cap payloads at 5 MB
 const CODE_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789"; // no easily-confused chars
 
@@ -36,17 +41,44 @@ function newCode(): string {
   return code;
 }
 
-// ---- storage (the single swap point for a hosted KV later) -------------------------------------
+// ---- Redis over REST (Upstash / Vercel KV) — no client dependency needed ------------------------
+const REDIS_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL;
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN;
+const redisBacked = Boolean(REDIS_URL && REDIS_TOKEN);
+
+/** Run one Redis command over the REST endpoint; returns the raw `result`. */
+async function redis(command: (string | number)[]): Promise<unknown> {
+  const response = await fetch(REDIS_URL as string, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(command),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    throw new Error(`redis rest call failed: ${response.status} ${await response.text()}`);
+  }
+  return ((await response.json()) as { result: unknown }).result;
+}
+
+// ---- storage (Redis when configured, temp-dir files for local dev) ------------------------------
 async function putSession(payload: string): Promise<string> {
+  const code = newCode();
+  if (redisBacked) {
+    await redis(["SET", `vp:sess:${code}`, payload, "EX", TTL_SECONDS]);
+    return code;
+  }
   await mkdir(STORE_DIR, { recursive: true });
   await pruneExpired();
-  const code = newCode();
   await writeFile(join(STORE_DIR, `${code}.json`), payload, "utf8");
   return code;
 }
 
 async function getSession(code: string): Promise<string | null> {
   if (!/^[a-z0-9]{1,32}$/.test(code)) return null; // guard against path traversal
+  if (redisBacked) {
+    const value = await redis(["GET", `vp:sess:${code}`]);
+    return typeof value === "string" ? value : null;
+  }
   try {
     const file = join(STORE_DIR, `${code}.json`);
     const info = await stat(file);
@@ -59,6 +91,10 @@ async function getSession(code: string): Promise<string | null> {
 
 async function putLive(code: string, payload: string): Promise<boolean> {
   if (!/^[a-z0-9]{1,32}$/.test(code)) return false;
+  if (redisBacked) {
+    await redis(["SET", `vp:live:${code}`, payload, "EX", TTL_SECONDS]);
+    return true;
+  }
   await mkdir(STORE_DIR, { recursive: true });
   await writeFile(join(STORE_DIR, `${code}.live.json`), payload, "utf8");
   return true;
@@ -66,6 +102,10 @@ async function putLive(code: string, payload: string): Promise<boolean> {
 
 async function getLive(code: string): Promise<string | null> {
   if (!/^[a-z0-9]{1,32}$/.test(code)) return null;
+  if (redisBacked) {
+    const value = await redis(["GET", `vp:live:${code}`]);
+    return typeof value === "string" ? value : null;
+  }
   try {
     const file = join(STORE_DIR, `${code}.live.json`);
     const info = await stat(file);
